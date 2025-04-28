@@ -1,7 +1,7 @@
 {
   "name": "nix",
   "version": "0.1.0",
-  "description": "My NixOS and macOS configuration files",
+  "description": "An iterative Nix flake-based configuration of my current dotfiles.",
   "scripts": {
     "release": "release-it"
   },
