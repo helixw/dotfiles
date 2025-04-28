@@ -1,0 +1,58 @@
+{
+  "name": "nix",
+  "version": "0.0.0",
+  "description": "My NixOS and macOS configuration files",
+  "scripts": {
+    "release": "release-it"
+  },
+  "author": "Shreyas Khan <shreyas.khan@hotmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HelixW/dotfiles.git"
+  },
+  "bugs": {
+    "url": "https://github.com/HelixW/dotfiles/issues"
+  },
+  "homepage": "https://github.com/HelixW/dotfiles#readme",
+  "release-it": {
+    "git": {
+      "commitMessage": "chore: release v${version}"
+    },
+    "github": {
+      "release": true
+    },
+    "npm": {
+      "publish": false
+    },
+    "plugins": {
+      "@release-it/conventional-changelog": {
+        "infile": "CHANGELOG.md",
+        "preset": {
+          "name": "conventionalcommits",
+          "types": [
+            {
+              "type": "feat",
+              "section": "Features"
+            },
+            {
+              "type": "fix",
+              "section": "Bug Fixes"
+            },
+            {
+              "type": "chore",
+              "section": "Chores"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.8.0",
+    "@commitlint/config-conventional": "^19.8.0",
+    "@release-it/conventional-changelog": "^10.0.1",
+    "husky": "^9.1.7",
+    "release-it": "^19.0.1"
+  }
+}
