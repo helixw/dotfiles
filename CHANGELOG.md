@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>1.1.1 (2025-05-07)</small>
+
+* fix: update package.json ([7737e4e](https://github.com/HelixW/dotfiles/commit/7737e4e))
+* fix: update package.json ([c5c5190](https://github.com/HelixW/dotfiles/commit/c5c5190))
+
 ## 1.1.0 (2025-05-07)
 
 * fix: update config file to be utilising home.file ([c06bae9](https://github.com/HelixW/dotfiles/commit/c06bae9))
