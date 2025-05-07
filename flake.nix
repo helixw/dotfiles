@@ -144,15 +144,6 @@
 
       # Enable ZSH
       programs.zsh.enable = true;
-      
-      # Git configuration
-      programs.git = {
-        enable = true;
-        extraConfig = {
-          credential.helper = "cache";
-        };
-      };
-      
       system.configurationRevision = self.rev or self.dirtyRev or null;
       system.stateVersion = 6;
       nixpkgs.hostPlatform = "aarch64-darwin";
@@ -574,6 +565,9 @@
 
                 [commit]
                   gpgsign = true
+
+                [credential]
+                  helper = cache
 
                 [alias]
                   # Common git command shortcuts
