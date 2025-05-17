@@ -65,6 +65,7 @@
           "microsoft-outlook"
           "shadow"
           "docker"
+          "scroll-reverser"
         ];
         masApps = {};
         onActivation.cleanup = "zap";
