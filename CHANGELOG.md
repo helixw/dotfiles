@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0 (2025-05-25)
+
+* feat: update casks ([a09d713](https://github.com/HelixW/dotfiles/commit/a09d713))
+
 ## 1.2.0 (2025-05-17)
 
 * feat: add scroll-reverser cask ([2591933](https://github.com/HelixW/dotfiles/commit/2591933))
