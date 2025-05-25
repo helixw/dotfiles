@@ -66,6 +66,7 @@
           "shadow"
           "docker"
           "scroll-reverser"
+          "zoom"
         ];
         masApps = {};
         onActivation.cleanup = "zap";
