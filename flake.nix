@@ -46,6 +46,7 @@
           "virtualenv"
           "poetry"
           "git-secret"
+          "gh"
         ];
         casks = [
           "font-jetbrains-mono-nerd-font"

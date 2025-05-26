@@ -3,7 +3,9 @@
   "version": "0.0.1",
   "description": "An iterative Nix flake-based configuration of my current dotfiles.",
   "scripts": {
-    "release": "standard-version",
+    "release": "standard-version && npm run push-release",
+    "push-release": "git push --follow-tags && npm run github-release",
+    "github-release": "gh release create $(git describe --tags --abbrev=0) -F CHANGELOG.md",
     "prepare": "husky"
   },
   "repository": {
