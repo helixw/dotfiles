@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.0 (2025-05-26)
+
+* chore: reformat flake.nix and improve comments ([5a67cd9](https://github.com/HelixW/dotfiles/commit/5a67cd9))
+* feat: add cursor ([d162a9b](https://github.com/HelixW/dotfiles/commit/d162a9b))
+
 ## 1.3.0 (2025-05-25)
 
 * feat: update casks ([a09d713](https://github.com/HelixW/dotfiles/commit/a09d713))
