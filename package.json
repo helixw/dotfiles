@@ -1,58 +1,28 @@
 {
-  "name": "nix",
-  "version": "1.4.0",
+  "name": "dotfiles",
+  "version": "1.0.0",
   "description": "An iterative Nix flake-based configuration of my current dotfiles.",
   "scripts": {
-    "release": "release-it"
+    "release": "standard-version",
+    "prepare": "husky"
   },
-  "author": "Shreyas Khan <shreyas.khan@hotmail.com>",
-  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/HelixW/dotfiles.git"
   },
+  "author": "Shreyas Khan <shreyas.khan@hotmail.com>",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/HelixW/dotfiles/issues"
   },
   "homepage": "https://github.com/HelixW/dotfiles#readme",
-  "release-it": {
-    "git": {
-      "commitMessage": "chore: release v${version}"
-    },
-    "github": {
-      "release": true
-    },
-    "npm": {
-      "publish": false
-    },
-    "plugins": {
-      "@release-it/conventional-changelog": {
-        "infile": "CHANGELOG.md",
-        "preset": {
-          "name": "conventionalcommits",
-          "types": [
-            {
-              "type": "feat",
-              "section": "Features"
-            },
-            {
-              "type": "fix",
-              "section": "Bug Fixes"
-            },
-            {
-              "type": "chore",
-              "section": "Chores"
-            }
-          ]
-        }
-      }
-    }
-  },
   "devDependencies": {
-    "@commitlint/cli": "^19.8.0",
-    "@commitlint/config-conventional": "^19.8.0",
-    "@release-it/conventional-changelog": "^10.0.1",
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
+    "commitizen": "^4.3.1",
+    "commitlint": "^19.8.1",
+    "cz-conventional-changelog": "^3.3.0",
     "husky": "^9.1.7",
-    "release-it": "^19.0.1"
+    "standard-version": "^9.5.0"
   }
 }
