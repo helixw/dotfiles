@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.1.1](https://github.com/HelixW/dotfiles/compare/v0.1.0...v1.1.1) (2025-05-26)
+
+
+### Bug Fixes
+
+* **release:** update release version ([d0d904a](https://github.com/HelixW/dotfiles/commit/d0d904a2bc84b55e7c4ac58984f3f50fa3c5293a))
+
 ## [0.1.0](https://github.com/HelixW/dotfiles/compare/v0.0.1...v0.1.0) (2025-05-26)
 
 
