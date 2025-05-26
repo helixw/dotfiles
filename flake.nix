@@ -67,6 +67,7 @@
           "docker"
           "scroll-reverser"
           "zoom"
+	  "cursor"
         ];
         masApps = {};
         onActivation.cleanup = "zap";
@@ -662,12 +663,6 @@
                     ln -sf "$target" "$HOME/$file"
                   fi
                 }
-
-                # Process Cursor configuration files
-                move_and_link ".cursor"
-                move_and_link ".cursor-vip"
-                move_and_link ".cursor-viprc"
-                move_and_link ".yarnsh"
               '';
 
               # 2. Configure Parsec application
