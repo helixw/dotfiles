@@ -32,6 +32,7 @@
         enable = true;
         taps = [
           "nikitabobko/tap"
+          "wez/wezterm"
         ];
         brews = [
           "mas"
@@ -50,12 +51,12 @@
         ];
         casks = [
           "font-jetbrains-mono-nerd-font"
-          "wezterm"
+          "wez/wezterm/wezterm"
           "raycast"
           "the-unarchiver"
           "sublime-text"
           "appcleaner"
-          "arc"
+          "thebrowsercompany-dia"
           "1password"
           "ticktick"
           "parsec"
@@ -66,10 +67,11 @@
           "altserver"
           "microsoft-outlook"
           "shadow"
-          "docker"
+          "docker-desktop"
           "scroll-reverser"
           "zoom"
           "cursor"
+          "setapp"
         ];
         masApps = {};
         onActivation.cleanup = "zap";
@@ -103,12 +105,12 @@
         dock.show-recents = false;
         dock.persistent-apps = [
           "/Applications/1Password.app"
-          "/Applications/Microsoft\ Outlook.app"
+          "/Applications/WezTerm.app"
           "/System/Applications/Messages.app"
           "/Applications/Discord.app"
-          "/Applications/WezTerm.app"
+          "/Applications/Microsoft\ Outlook.app"
           "/Applications/TickTick.app"
-          "/Applications/Arc.app"
+          "/Applications/Dia.app"
           "/Applications/Obsidian.app"
           "/Applications/Cursor.app"
           "/Applications/PDF\ Expert.app"
@@ -146,10 +148,8 @@
         };
       };
 
-      # System settings activation script
-      system.activationScripts.postUserActivation.text = ''
-        /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u
-      '';
+      # Set primary user for system-wide activation
+      system.primaryUser = "helixw";
 
       # Nix daemon configuration
       nix.settings.experimental-features = "nix-command flakes";
@@ -625,7 +625,7 @@
                 autosuggestion.enable = true;
                 syntaxHighlighting.enable = true;
 
-                initExtra = ''
+                initContent = ''
                   # Path configuration
                   export PATH="$HOME/bin:$PATH"
                   export XDG_CONFIG_HOME="$HOME/.config"
@@ -637,7 +637,7 @@
 
                   # Useful aliases
                   alias ll="ls -lah"
-                  alias dr="darwin-rebuild switch --flake ~/.config/nix#solstice"
+                  alias dr="sudo darwin-rebuild switch --flake ~/.config/nix#solstice"
                   
                   # Git aliases
                   alias gs="git status"
