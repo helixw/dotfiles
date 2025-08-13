@@ -1,6 +1,6 @@
 {
   "name": "dotfiles",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "An iterative Nix flake-based configuration of my current dotfiles.",
   "scripts": {
     "release": "standard-version && npm run push-release",
@@ -21,9 +21,7 @@
   "devDependencies": {
     "@commitlint/cli": "^19.8.1",
     "@commitlint/config-conventional": "^19.8.1",
-    "commitizen": "^4.3.1",
     "commitlint": "^19.8.1",
-    "cz-conventional-changelog": "^3.3.0",
     "husky": "^9.1.7",
     "standard-version": "^9.5.0"
   }
