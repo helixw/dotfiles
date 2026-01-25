@@ -1,9 +1,9 @@
 {
-  description = "Solstice nix-darwin system flake";
+  description = "Aurelia nix-darwin system flake";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    nix-darwin.url = "github:nix-darwin/nix-darwin/master";
+    nix-darwin.url = "github:LnL7/nix-darwin";
     nix-darwin.inputs.nixpkgs.follows = "nixpkgs";
     nix-homebrew.url = "github:zhaofengli-wip/nix-homebrew";
     home-manager.url = "github:nix-community/home-manager";
@@ -14,6 +14,9 @@
     configuration = { pkgs, config, ... }: {
       # Package configuration
       nixpkgs.config.allowUnfree = true;
+      
+      # Suppress warnings (if supported)
+      warnings = [];
 
       # User account configuration
       users.users.helixw = {
@@ -32,7 +35,6 @@
         enable = true;
         taps = [
           "nikitabobko/tap"
-          "wez/wezterm"
         ];
         brews = [
           "mas"
@@ -45,33 +47,39 @@
           "python"
           "tree"
           "virtualenv"
-          "poetry"
           "git-secret"
           "gh"
+          "uv"
+          "btop"
+          "oven-sh/bun/bun"
+          "git-secret"
         ];
         casks = [
           "font-jetbrains-mono-nerd-font"
-          "wez/wezterm/wezterm"
           "raycast"
           "the-unarchiver"
           "sublime-text"
           "appcleaner"
-          "thebrowsercompany-dia"
           "1password"
-          "ticktick"
-          "parsec"
           "aerospace"
-          "krisp"
-          "discord"
-          "obsidian"
-          "altserver"
-          "microsoft-outlook"
-          "shadow"
           "docker-desktop"
           "scroll-reverser"
           "zoom"
           "cursor"
-          "setapp"
+          "shottr"
+          "the-unarchiver"
+          "parsec"
+          "ghostty"
+          "altserver"
+          "webcatalog"
+          "ollama-app"
+          "google-drive"
+          "microsoft-office"
+          "notion"
+          "chatgpt-atlas"
+          "ticktick"
+          "iina"
+          "transmission"
         ];
         masApps = {};
         onActivation.cleanup = "zap";
@@ -101,27 +109,28 @@
       # macOS system preferences configuration
       system.defaults = {
         # Dock configuration
-        dock.orientation = "right";
-        dock.show-recents = false;
-        dock.persistent-apps = [
-          "/Applications/1Password.app"
-          "/Applications/WezTerm.app"
-          "/System/Applications/Messages.app"
-          "/Applications/Discord.app"
-          "/Applications/Microsoft\ Outlook.app"
-          "/Applications/TickTick.app"
-          "/Applications/Dia.app"
-          "/Applications/Obsidian.app"
-          "/Applications/Cursor.app"
-          "/Applications/PDF\ Expert.app"
-          "/Applications/Parallels\ Desktop.app"
-          "/Users/helixw/Parallels/Windows\ 11.pvm/Windows\ 11.app"
-          "/Applications/Shadow\ PC.app"
-          "/Applications/Parsec.app"
-          "/System/Applications/App\ Store.app"
-          "/System/Applications/System\ Settings.app"
-          "/Applications/AppCleaner.app"
-        ];
+        dock = {
+          orientation = "right";
+          show-recents = false;
+          persistent-apps = [
+            "/Applications/Ghostty.app"
+            "/Applications/1Password.app"
+            "/Applications/Ticktick.app"
+            "/Applications/Microsoft Outlook.app"
+            "/Users/helixw/Applications/WebCatalog Apps/Google Chat.app"
+            "/Applications/Zoom.us.app"
+            "/Applications/ChatGPT Atlas.app"
+            "/Applications/Notion.app"
+            "/Applications/Cursor.app"
+            "/Applications/Microsoft Excel.app"
+            "/Applications/Microsoft Word.app"
+            "/Applications/Microsoft PowerPoint.app"
+            "/Applications/PDF Expert.app"
+            "/System/Applications/App Store.app"
+            "/System/Applications/System Settings.app"
+            "/Applications/AppCleaner.app"
+          ];
+        };
 
         # Trackpad configuration
         trackpad = {
@@ -130,29 +139,32 @@
         };
 
         # Login window configuration
-        loginwindow.GuestEnabled = false;
+        loginwindow = {
+          GuestEnabled = false;
+        };
 
         # Global domain preferences
-        NSGlobalDomain.AppleICUForce24HourTime = true;
-        NSGlobalDomain.AppleInterfaceStyle = "Dark";
-        NSGlobalDomain.KeyRepeat = 2;
-
-        # Custom user preferences
-        CustomUserPreferences = {
-          "com.apple.symbolichotkeys" = {
-            AppleSymbolicHotKeys = {
-              "64" = { enabled = false; };
-              "65" = { enabled = false; };
-            };
-          };
+        NSGlobalDomain = {
+          "AppleICUForce24HourTime" = true;
+          "AppleInterfaceStyle" = "Dark";
+          "KeyRepeat" = 2;
+          "_HIHideMenuBar" = false;
         };
       };
+
+      # Custom user preferences (using activation script to avoid plist warnings)
+      system.activationScripts.userDefaults.text = ''
+        # Disable spotlight keyboard shortcuts
+        /usr/bin/defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 64 '{ enabled = 0; }'
+        /usr/bin/defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 65 '{ enabled = 0; }'
+      '';
 
       # Set primary user for system-wide activation
       system.primaryUser = "helixw";
 
       # Nix daemon configuration
-      nix.settings.experimental-features = "nix-command flakes";
+      # Disable nix-darwin's Nix management (using Determinate Nix)
+      nix.enable = false;
 
       # Shell configuration
       programs.zsh.enable = true;
@@ -162,7 +174,7 @@
     };
   in {
     # Darwin system configuration
-    darwinConfigurations."solstice" = nix-darwin.lib.darwinSystem {
+    darwinConfigurations."aurelia" = nix-darwin.lib.darwinSystem {
       modules = [
         configuration
         nix-homebrew.darwinModules.nix-homebrew
@@ -194,8 +206,6 @@
               # Directory creation activation script
               home.activation.createDirectories = config.lib.dag.entryAfter [ "writeBoundary" ] ''
                 mkdir -p "$HOME/.config/vim"
-                mkdir -p "$HOME/.config/cursor"
-                mkdir -p "$HOME/.config/parsec"
                 mkdir -p "$HOME/.gnupg"
               '';
 
@@ -224,47 +234,23 @@
                   syntax on
                 '';
 
-                # WezTerm terminal emulator configuration
-                ".config/wezterm/wezterm.lua".text = ''
-                  local wezterm = require("wezterm")
 
-                  config = {
-                    -- Automatically reload configuration when changed
-                    automatically_reload_config = true,
-                    -- Disable tab bar for cleaner interface
-                    enable_tab_bar = false,
-                    -- Prevent confirmation when closing windows
-                    window_close_confirmation = "NeverPrompt",
-                    -- Allow window resizing only
-                    window_decorations = "RESIZE",
-                    -- Set colour scheme
-                    color_scheme = 'Gruvbox dark, soft (base16)',
-                    -- Configure font with weight
-                    font = wezterm.font("JetBrainsMono Nerd Font", { weight = "Bold" }),
-                    font_size = 12,
-                    -- Set background transparency
-                    window_background_opacity = 0.70,
-                  }
-
-                  return config
-                '';
 
                 # Starship prompt configuration
                 ".config/starship/starship.toml".text = ''
                   "$schema" = 'https://starship.rs/config-schema.json'
-
+                  
                   format = """
-                  [](color_orange)\
+                  [](red)\
                   $os\
                   $username\
-                  [](bg:color_yellow fg:color_orange)\
+                  [](bg:peach fg:red)\
                   $directory\
-                  [](fg:color_yellow bg:color_aqua)\
+                  [](bg:yellow fg:peach)\
                   $git_branch\
                   $git_status\
-                  [](fg:color_aqua bg:color_blue)\
+                  [](fg:yellow bg:green)\
                   $c\
-                  $cpp\
                   $rust\
                   $golang\
                   $nodejs\
@@ -273,35 +259,23 @@
                   $kotlin\
                   $haskell\
                   $python\
-                  [](fg:color_blue bg:color_bg3)\
-                  $docker_context\
+                  [](fg:green bg:sapphire)\
                   $conda\
-                  $pixi\
-                  [](fg:color_bg3 bg:color_bg1)\
+                  [](fg:sapphire bg:lavender)\
                   $time\
-                  [ ](fg:color_bg1)\
-                  $line_break$character"""
+                  [ ](fg:lavender)\
+                  $cmd_duration\
+                  $line_break\
+                  $character"""
 
-                  palette = 'gruvbox_dark'
-
-                  [palettes.gruvbox_dark]
-                  color_fg0 = '#fbf1c7'
-                  color_bg1 = '#3c3836'
-                  color_bg3 = '#665c54'
-                  color_blue = '#458588'
-                  color_aqua = '#689d6a'
-                  color_green = '#98971a'
-                  color_orange = '#d65d0e'
-                  color_purple = '#b16286'
-                  color_red = '#cc241d'
-                  color_yellow = '#d79921'
+                  palette = 'catppuccin_mocha'
 
                   [os]
                   disabled = false
-                  style = "bg:color_orange fg:color_fg0"
+                  style = "bg:red fg:crust"
 
                   [os.symbols]
-                  Windows = "󰍲"
+                  Windows = ""
                   Ubuntu = "󰕈"
                   SUSE = ""
                   Raspbian = "󰐿"
@@ -316,21 +290,19 @@
                   Android = ""
                   Arch = "󰣇"
                   Artix = "󰣇"
-                  EndeavourOS = ""
                   CentOS = ""
                   Debian = "󰣚"
                   Redhat = "󱄛"
                   RedHatEnterprise = "󱄛"
-                  Pop = ""
 
                   [username]
                   show_always = true
-                  style_user = "bg:color_orange fg:color_fg0"
-                  style_root = "bg:color_orange fg:color_fg0"
-                  format = '[ $user ]($style)'
+                  style_user = "bg:red fg:crust"
+                  style_root = "bg:red fg:crust"
+                  format = '[ $user]($style)'
 
                   [directory]
-                  style = "fg:color_fg0 bg:color_yellow"
+                  style = "bg:peach fg:crust"
                   format = "[ $path ]($style)"
                   truncation_length = 3
                   truncation_symbol = "…/"
@@ -344,93 +316,206 @@
 
                   [git_branch]
                   symbol = ""
-                  style = "bg:color_aqua"
-                  format = '[[ $symbol $branch ](fg:color_fg0 bg:color_aqua)]($style)'
+                  style = "bg:yellow"
+                  format = '[[ $symbol $branch ](fg:crust bg:yellow)]($style)'
 
                   [git_status]
-                  style = "bg:color_aqua"
-                  format = '[[($all_status$ahead_behind )](fg:color_fg0 bg:color_aqua)]($style)'
+                  style = "bg:yellow"
+                  format = '[[($all_status$ahead_behind )](fg:crust bg:yellow)]($style)'
 
                   [nodejs]
                   symbol = ""
-                  style = "bg:color_blue"
-                  format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+                  style = "bg:green"
+                  format = '[[ $symbol( $version) ](fg:crust bg:green)]($style)'
 
                   [c]
                   symbol = " "
-                  style = "bg:color_blue"
-                  format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
-
-                  [cpp]
-                  symbol = " "
-                  style = "bg:color_blue"
-                  format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+                  style = "bg:green"
+                  format = '[[ $symbol( $version) ](fg:crust bg:green)]($style)'
 
                   [rust]
                   symbol = ""
-                  style = "bg:color_blue"
-                  format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+                  style = "bg:green"
+                  format = '[[ $symbol( $version) ](fg:crust bg:green)]($style)'
 
                   [golang]
                   symbol = ""
-                  style = "bg:color_blue"
-                  format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+                  style = "bg:green"
+                  format = '[[ $symbol( $version) ](fg:crust bg:green)]($style)'
 
                   [php]
                   symbol = ""
-                  style = "bg:color_blue"
-                  format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+                  style = "bg:green"
+                  format = '[[ $symbol( $version) ](fg:crust bg:green)]($style)'
 
                   [java]
-                  symbol = ""
-                  style = "bg:color_blue"
-                  format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+                  symbol = " "
+                  style = "bg:green"
+                  format = '[[ $symbol( $version) ](fg:crust bg:green)]($style)'
 
                   [kotlin]
                   symbol = ""
-                  style = "bg:color_blue"
-                  format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+                  style = "bg:green"
+                  format = '[[ $symbol( $version) ](fg:crust bg:green)]($style)'
 
                   [haskell]
                   symbol = ""
-                  style = "bg:color_blue"
-                  format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+                  style = "bg:green"
+                  format = '[[ $symbol( $version) ](fg:crust bg:green)]($style)'
 
                   [python]
                   symbol = ""
-                  style = "bg:color_blue"
-                  format = '[[ $symbol( $version) ](fg:color_fg0 bg:color_blue)]($style)'
+                  style = "bg:green"
+                  format = '[[ $symbol( $version)(\(#$virtualenv\)) ](fg:crust bg:green)]($style)'
 
                   [docker_context]
                   symbol = ""
-                  style = "bg:color_bg3"
-                  format = '[[ $symbol( $context) ](fg:#83a598 bg:color_bg3)]($style)'
+                  style = "bg:sapphire"
+                  format = '[[ $symbol( $context) ](fg:crust bg:sapphire)]($style)'
 
                   [conda]
-                  style = "bg:color_bg3"
-                  format = '[[ $symbol( $environment) ](fg:#83a598 bg:color_bg3)]($style)'
-
-                  [pixi]
-                  style = "bg:color_bg3"
-                  format = '[[ $symbol( $version)( $environment) ](fg:color_fg0 bg:color_bg3)]($style)'
+                  symbol = "  "
+                  style = "fg:crust bg:sapphire"
+                  format = '[$symbol$environment ]($style)'
+                  ignore_base = false
 
                   [time]
                   disabled = false
                   time_format = "%R"
-                  style = "bg:color_bg1"
-                  format = '[[  $time ](fg:color_fg0 bg:color_bg1)]($style)'
+                  style = "bg:lavender"
+                  format = '[[  $time ](fg:crust bg:lavender)]($style)'
 
                   [line_break]
-                  disabled = false
+                  disabled = true
 
                   [character]
                   disabled = false
-                  success_symbol = '[](bold fg:color_green)'
-                  error_symbol = '[](bold fg:color_red)'
-                  vimcmd_symbol = '[](bold fg:color_green)'
-                  vimcmd_replace_one_symbol = '[](bold fg:color_purple)'
-                  vimcmd_replace_symbol = '[](bold fg:color_purple)'
-                  vimcmd_visual_symbol = '[](bold fg:color_yellow)'
+                  success_symbol = '[❯](bold fg:green)'
+                  error_symbol = '[❯](bold fg:red)'
+                  vimcmd_symbol = '[❮](bold fg:green)'
+                  vimcmd_replace_one_symbol = '[❮](bold fg:lavender)'
+                  vimcmd_replace_symbol = '[❮](bold fg:lavender)'
+                  vimcmd_visual_symbol = '[❮](bold fg:yellow)'
+
+                  [cmd_duration]
+                  show_milliseconds = true
+                  format = " in $duration "
+                  style = "bg:lavender"
+                  disabled = false
+                  show_notifications = true
+                  min_time_to_notify = 45000
+
+                  [palettes.catppuccin_mocha]
+                  rosewater = "#f5e0dc"
+                  flamingo = "#f2cdcd"
+                  pink = "#f5c2e7"
+                  mauve = "#cba6f7"
+                  red = "#f38ba8"
+                  maroon = "#eba0ac"
+                  peach = "#fab387"
+                  yellow = "#f9e2af"
+                  green = "#a6e3a1"
+                  teal = "#94e2d5"
+                  sky = "#89dceb"
+                  sapphire = "#74c7ec"
+                  blue = "#89b4fa"
+                  lavender = "#b4befe"
+                  text = "#cdd6f4"
+                  subtext1 = "#bac2de"
+                  subtext0 = "#a6adc8"
+                  overlay2 = "#9399b2"
+                  overlay1 = "#7f849c"
+                  overlay0 = "#6c7086"
+                  surface2 = "#585b70"
+                  surface1 = "#45475a"
+                  surface0 = "#313244"
+                  base = "#1e1e2e"
+                  mantle = "#181825"
+                  crust = "#11111b"
+
+                  [palettes.catppuccin_frappe]
+                  rosewater = "#f2d5cf"
+                  flamingo = "#eebebe"
+                  pink = "#f4b8e4"
+                  mauve = "#ca9ee6"
+                  red = "#e78284"
+                  maroon = "#ea999c"
+                  peach = "#ef9f76"
+                  yellow = "#e5c890"
+                  green = "#a6d189"
+                  teal = "#81c8be"
+                  sky = "#99d1db"
+                  sapphire = "#85c1dc"
+                  blue = "#8caaee"
+                  lavender = "#babbf1"
+                  text = "#c6d0f5"
+                  subtext1 = "#b5bfe2"
+                  subtext0 = "#a5adce"
+                  overlay2 = "#949cbb"
+                  overlay1 = "#838ba7"
+                  overlay0 = "#737994"
+                  surface2 = "#626880"
+                  surface1 = "#51576d"
+                  surface0 = "#414559"
+                  base = "#303446"
+                  mantle = "#292c3c"
+                  crust = "#232634"
+
+                  [palettes.catppuccin_latte]
+                  rosewater = "#dc8a78"
+                  flamingo = "#dd7878"
+                  pink = "#ea76cb"
+                  mauve = "#8839ef"
+                  red = "#d20f39"
+                  maroon = "#e64553"
+                  peach = "#fe640b"
+                  yellow = "#df8e1d"
+                  green = "#40a02b"
+                  teal = "#179299"
+                  sky = "#04a5e5"
+                  sapphire = "#209fb5"
+                  blue = "#1e66f5"
+                  lavender = "#7287fd"
+                  text = "#4c4f69"
+                  subtext1 = "#5c5f77"
+                  subtext0 = "#6c6f85"
+                  overlay2 = "#7c7f93"
+                  overlay1 = "#8c8fa1"
+                  overlay0 = "#9ca0b0"
+                  surface2 = "#acb0be"
+                  surface1 = "#bcc0cc"
+                  surface0 = "#ccd0da"
+                  base = "#eff1f5"
+                  mantle = "#e6e9ef"
+                  crust = "#dce0e8"
+
+                  [palettes.catppuccin_macchiato]
+                  rosewater = "#f4dbd6"
+                  flamingo = "#f0c6c6"
+                  pink = "#f5bde6"
+                  mauve = "#c6a0f6"
+                  red = "#ed8796"
+                  maroon = "#ee99a0"
+                  peach = "#f5a97f"
+                  yellow = "#eed49f"
+                  green = "#a6da95"
+                  teal = "#8bd5ca"
+                  sky = "#91d7e3"
+                  sapphire = "#7dc4e4"
+                  blue = "#8aadf4"
+                  lavender = "#b7bdf8"
+                  text = "#cad3f5"
+                  subtext1 = "#b8c0e0"
+                  subtext0 = "#a5adcb"
+                  overlay2 = "#939ab7"
+                  overlay1 = "#8087a2"
+                  overlay0 = "#6e738d"
+                  surface2 = "#5b6078"
+                  surface1 = "#494d64"
+                  surface0 = "#363a4f"
+                  base = "#24273a"
+                  mantle = "#1e2030"
+                  crust = "#181926"
                 '';
 
                 # AeroSpace window manager configuration
@@ -579,12 +664,18 @@
                       shift-down = ['volume set 0', 'mode main']
                 '';
 
+                # Ghostty terminal configuration
+                ".config/ghostty/config".text = ''
+                  theme = catppuccin-mocha
+                  background-opacity = 0.7
+                '';
+
                 # Git version control configuration
                 ".config/git/config".text = ''
                   [user]
                     name = Shreyas Khan
                     email = shreyas.khan@hotmail.com
-                    signingkey = 96B5FFBD136F5A2C21BD6649CD09C64BDFCD678D
+                    signingkey = E79A919126BB4CD44F3B6B727F1E7FA9525A7397
 
                   [core]
                     editor = vim
@@ -595,6 +686,12 @@
 
                   [commit]
                     gpgsign = true
+
+                  [tag]
+                    gpgsign = true
+
+                  [gpg]
+                    format = openpgp
 
                   [credential]
                     helper = cache
@@ -620,7 +717,7 @@
               # ZSH shell configuration
               programs.zsh = {
                 enable = true;
-                dotDir = ".config/zsh";
+                dotDir = "${config.xdg.configHome}/zsh";
                 enableCompletion = true;
                 autosuggestion.enable = true;
                 syntaxHighlighting.enable = true;
@@ -628,7 +725,12 @@
                 initContent = ''
                   # Path configuration
                   export PATH="$HOME/bin:$PATH"
+                  
+                  # XDG Base Directory Specification
                   export XDG_CONFIG_HOME="$HOME/.config"
+                  export XDG_DATA_HOME="$HOME/.local/share"
+                  export XDG_CACHE_HOME="$HOME/.cache"
+                  export XDG_STATE_HOME="$HOME/.local/state"
                   
                   # History settings
                   export HISTFILE="$ZDOTDIR/.zsh_history"
@@ -637,7 +739,7 @@
 
                   # Useful aliases
                   alias ll="ls -lah"
-                  alias dr="sudo darwin-rebuild switch --flake ~/.config/nix#solstice"
+                  alias dr="sudo darwin-rebuild switch --flake ~/Code/dotfiles#aurelia"
                   
                   # Git aliases
                   alias gs="git status"
@@ -678,34 +780,6 @@
 
               # Application configuration activation scripts
               home.activation = {
-                # Cursor application configuration
-                linkCursorConfig = config.lib.dag.entryAfter [ "createDirectories" ] ''
-                  # Function to move files to XDG directory and create symlinks
-                  move_and_link() {
-                    local file="$1"
-                    local target="$HOME/.config/cursor/$file"
-
-                    if [ -e "$HOME/$file" ]; then
-                      if [ ! -L "$HOME/$file" ]; then
-                        mv "$HOME/$file" "$target"
-                      fi
-                      ln -sf "$target" "$HOME/$file"
-                    fi
-                  }
-                '';
-
-                # Parsec application configuration
-                linkParsecConfig = config.lib.dag.entryAfter [ "createDirectories" ] ''
-                  # Move Parsec configuration to XDG directory
-                  if [ -d "$HOME/.parsec" ] && [ ! -L "$HOME/.parsec" ]; then
-                    mv "$HOME/.parsec" "$HOME/.config/parsec"
-                  fi
-
-                  # Create symlink to XDG directory
-                  if [ ! -e "$HOME/.parsec" ]; then
-                    ln -s "$HOME/.config/parsec" "$HOME/.parsec"
-                  fi
-                '';
 
                 # GPG directory permissions configuration
                 setGpgPermissions = config.lib.dag.entryAfter [ "writeBoundary" ".gnupg/gpg-agent.conf" ] ''
