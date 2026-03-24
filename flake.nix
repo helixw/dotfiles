@@ -73,13 +73,13 @@
           "altserver"
           "webcatalog"
           "ollama-app"
-          "google-drive"
-          "microsoft-office"
           "notion"
           "chatgpt-atlas"
           "ticktick"
           "iina"
           "transmission"
+          "claude"
+          "claude-code"
         ];
         masApps = {};
         onActivation.cleanup = "zap";
@@ -117,7 +117,6 @@
             "/Applications/1Password.app"
             "/Applications/Ticktick.app"
             "/Applications/Microsoft Outlook.app"
-            "/Users/helixw/Applications/WebCatalog Apps/Google Chat.app"
             "/Applications/Zoom.us.app"
             "/Applications/ChatGPT Atlas.app"
             "/Applications/Notion.app"
@@ -666,7 +665,7 @@
 
                 # Ghostty terminal configuration
                 ".config/ghostty/config".text = ''
-                  theme = catppuccin-mocha
+                  theme = "Catppuccin Mocha"
                   background-opacity = 0.7
                 '';
 
