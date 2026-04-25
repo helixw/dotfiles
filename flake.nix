@@ -6,11 +6,19 @@
     nix-darwin.url = "github:LnL7/nix-darwin";
     nix-darwin.inputs.nixpkgs.follows = "nixpkgs";
     nix-homebrew.url = "github:zhaofengli-wip/nix-homebrew";
+    # Pin Homebrew sources to a release that supports macOS 26 (Tahoe).
+    # nix-homebrew's default brew-src lags behind, which causes
+    # "unknown or unsupported macOS version" errors on Tahoe.
+    brew-src = {
+      url = "github:Homebrew/brew/5.1.7";
+      flake = false;
+    };
+    nix-homebrew.inputs.brew-src.follows = "brew-src";
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = inputs@{ self, nix-darwin, nixpkgs, nix-homebrew, home-manager }: let
+  outputs = inputs@{ self, nix-darwin, nixpkgs, nix-homebrew, home-manager, ... }: let
     configuration = { pkgs, config, ... }: {
       # Package configuration
       nixpkgs.config.allowUnfree = true;
@@ -52,7 +60,6 @@
           "uv"
           "btop"
           "oven-sh/bun/bun"
-          "git-secret"
         ];
         casks = [
           "font-jetbrains-mono-nerd-font"
@@ -67,19 +74,18 @@
           "zoom"
           "cursor"
           "shottr"
-          "the-unarchiver"
           "parsec"
           "ghostty"
           "altserver"
           "webcatalog"
           "ollama-app"
           "notion"
-          "chatgpt-atlas"
           "ticktick"
           "iina"
           "transmission"
           "claude"
           "claude-code"
+          "google-chrome"
         ];
         masApps = {};
         onActivation.cleanup = "zap";
@@ -118,7 +124,7 @@
             "/Applications/Ticktick.app"
             "/Applications/Microsoft Outlook.app"
             "/Applications/Zoom.us.app"
-            "/Applications/ChatGPT Atlas.app"
+            "/Applications/Google Chrome.app"
             "/Applications/Notion.app"
             "/Applications/Cursor.app"
             "/Applications/Microsoft Excel.app"
@@ -674,7 +680,7 @@
                   [user]
                     name = Shreyas Khan
                     email = shreyas.khan@hotmail.com
-                    signingkey = E79A919126BB4CD44F3B6B727F1E7FA9525A7397
+                    signingkey = C593D008299634DDF8080C0E959EEAFBBEC90E58
 
                   [core]
                     editor = vim
