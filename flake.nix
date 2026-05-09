@@ -98,7 +98,7 @@
         env = pkgs.buildEnv {
           name = "system-applications";
           paths = config.environment.systemPackages;
-          pathsToLink = "/Applications";
+          pathsToLink = [ "/Applications" ];
         };
       in pkgs.lib.mkForce ''
         echo "Setting up /Applications..." >&2
