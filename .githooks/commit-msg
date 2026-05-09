@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Enforce Conventional Commits (https://www.conventionalcommits.org/).
+# Enabled per clone via: git config core.hooksPath .githooks
+set -euo pipefail
+
+commit_msg_file="$1"
+first_line=$(head -n1 "$commit_msg_file")
+
+# Skip git-generated commits (merge, revert, fixup/squash during rebase).
+if [[ "$first_line" =~ ^(Merge|Revert|fixup!|squash!|amend!) ]]; then
+  exit 0
+fi
+
+pattern='^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(\([a-z0-9._/-]+\))?!?: .+'
+
+if [[ ! "$first_line" =~ $pattern ]]; then
+  cat >&2 <<EOF
+Commit message does not follow Conventional Commits.
+
+  Got:      $first_line
+  Expected: <type>(<scope>)?: <description>
+  Types:    feat, fix, chore, docs, style, refactor, perf, test, build, ci, revert
+
+  Examples:
+    feat(homebrew): add capso cask
+    fix(flake): pin brew-src to 5.1.10
+    chore!: drop support for macOS 14
+
+  See https://www.conventionalcommits.org/
+EOF
+  exit 1
+fi
