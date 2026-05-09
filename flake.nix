@@ -43,6 +43,7 @@
         enable = true;
         taps = [
           "nikitabobko/tap"
+          "lzhgus/homebrew-tap"
         ];
         brews = [
           "mas"
@@ -73,7 +74,6 @@
           "scroll-reverser"
           "zoom"
           "cursor"
-          "shottr"
           "parsec"
           "ghostty"
           "altserver"
@@ -86,6 +86,8 @@
           "claude"
           "claude-code"
           "google-chrome"
+          "superwhisper"
+          "capso"
         ];
         masApps = {};
         onActivation.cleanup = "zap";
