@@ -6,11 +6,11 @@
     nix-darwin.url = "github:LnL7/nix-darwin";
     nix-darwin.inputs.nixpkgs.follows = "nixpkgs";
     nix-homebrew.url = "github:zhaofengli-wip/nix-homebrew";
-    # Pin Homebrew sources to a release that supports macOS 26 (Tahoe).
-    # nix-homebrew's default brew-src lags behind, which causes
-    # "unknown or unsupported macOS version" errors on Tahoe.
+    # Pin Homebrew sources to a release that supports macOS 26 (Tahoe)
+    # and includes the fix for `depends_on :macos` JSON-API serialization
+    # (Homebrew/brew#22137, shipped in 5.1.10).
     brew-src = {
-      url = "github:Homebrew/brew/5.1.7";
+      url = "github:Homebrew/brew/5.1.10";
       flake = false;
     };
     nix-homebrew.inputs.brew-src.follows = "brew-src";
