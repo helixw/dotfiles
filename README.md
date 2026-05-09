@@ -32,10 +32,21 @@ Or use the configured alias:
 dr
 ```
 
+## Development
+
+After cloning, enable the in-repo git hooks (enforces [Conventional Commits](https://www.conventionalcommits.org/) on every commit):
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This is a one-time setup per clone — git does not honour `core.hooksPath` automatically for security reasons.
+
 ## Structure
 
 - `flake.nix` - Main system configuration
 - `flake.lock` - Dependency lock file
+- `.githooks/` - Repo-tracked git hooks (enabled via `core.hooksPath`)
 
 ## Configuration Includes
 
