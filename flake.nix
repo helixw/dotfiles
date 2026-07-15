@@ -59,12 +59,14 @@
           "gnupg"
           "pinentry-mac"
           "node"
+          "node@22"
           "python"
           "tree"
           "virtualenv"
           "git-secret"
           "gh"
           "uv"
+          "lefthook"
           "btop"
           { name = "oven-sh/bun/bun"; trusted = true; }
         ];
