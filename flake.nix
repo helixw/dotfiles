@@ -76,7 +76,6 @@
           "appcleaner"
           "1password"
           "nikitabobko/tap/aerospace"
-          "docker-desktop"
           "scroll-reverser"
           "zoom"
           "cursor"
@@ -84,7 +83,6 @@
           "ghostty"
           "altserver"
           "webcatalog"
-          "ollama-app"
           "notion"
           "ticktick"
           "iina"
@@ -94,6 +92,8 @@
           "google-chrome"
           "superwhisper"
           "lzhgus/tap/capso"
+          "discord"
+          "calibre"
         ];
         masApps = {};
         onActivation.cleanup = "zap";
