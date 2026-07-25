@@ -96,6 +96,7 @@
           "lzhgus/tap/capso"
           "discord"
           "calibre"
+          "steam"
         ];
         masApps = {};
         onActivation.cleanup = "zap";
