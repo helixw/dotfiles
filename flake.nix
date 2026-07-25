@@ -135,6 +135,7 @@
             "/Applications/Ticktick.app"
             "/Applications/Microsoft Outlook.app"
             "/Applications/Zoom.us.app"
+            "/Applications/Discord.app"
             "/Applications/Google Chrome.app"
             "/Applications/Notion.app"
             "/Applications/Cursor.app"
