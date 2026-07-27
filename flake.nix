@@ -67,6 +67,8 @@
           "gh"
           "uv"
           "lefthook"
+          "shellcheck"
+          "poppler"
           "btop"
           { name = "oven-sh/bun/bun"; trusted = true; }
         ];
