@@ -759,6 +759,7 @@
                   # Useful aliases
                   alias ll="ls -lah"
                   alias dr="sudo darwin-rebuild switch --flake ~/Code/dotfiles#aurelia"
+                  alias claude="caffeinate -dims claude"
                   
                   # Git aliases
                   alias gs="git status"
