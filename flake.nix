@@ -31,9 +31,10 @@
     configuration = { pkgs, config, ... }: let
       # Unattended morning maintenance. Runs as the login user: no root, no
       # secrets, and macOS updates are listed only, never installed. Casks whose
-      # artifact is a pkg installer need sudo, so they are skipped here and left
-      # to the interactive run (verified 2026-08-09: zoom ships
-      # zoomusInstallerFull.pkg, parsec ships parsec-macos.pkg).
+      # artifacts carry a pkg stanza run an installer that asks for sudo, which
+      # there is no tty to answer, so the outdated list is filtered against
+      # brew's own metadata at run time and those are left to the interactive
+      # run.
       morningMaintenance = pkgs.writeShellScript "morning-maintenance" ''
         set -u
 
@@ -83,13 +84,44 @@
         "$BREW" upgrade --formula --yes || failed="''${failed:+$failed, }brew-upgrade-formula"
 
         log "brew upgrade (casks, excluding pkg installers)"
-        casks=$("$BREW" outdated --cask --quiet | grep -vxF -e zoom -e parsec || true)
-        if [ -n "$casks" ]; then
+        # A bare --cask with no names upgrades every cask, so a token list
+        # reaches brew only when it is known to be non-empty.
+        outdated=$("$BREW" outdated --cask --quiet || true)
+        if [ -z "$outdated" ]; then
+          log "no casks to upgrade"
+        else
+          # Which casks need sudo is read from brew's own metadata rather than
+          # named here, so a cask that gains or drops a pkg installer upstream
+          # is handled without an edit.
           # Intentional word splitting: one cask token per line.
           # shellcheck disable=SC2086
-          "$BREW" upgrade --cask --yes $casks || failed="''${failed:+$failed, }brew-upgrade-cask"
-        else
-          log "no casks to upgrade"
+          cask_json=$("$BREW" info --json=v2 --cask $outdated)
+          info_rc=$?
+          pkg_casks=$(printf '%s' "$cask_json" | jq -r '.casks[] | select([.artifacts[]? | objects | has("pkg")] | any) | .token')
+          jq_rc=$?
+
+          if [ "$info_rc" -ne 0 ] || [ "$jq_rc" -ne 0 ]; then
+            # jq reports an empty selection and a missing document the same way,
+            # so without a clean read a pkg cask could reach brew and stall on a
+            # sudo prompt that has no tty. The phase is skipped instead.
+            log "cask metadata unavailable; skipping cask upgrades"
+            failed="''${failed:+$failed, }brew-cask-metadata"
+          else
+            if [ -n "$pkg_casks" ]; then
+              log "leaving pkg-installer casks to the interactive run: $(printf '%s' "$pkg_casks" | tr '\n' ' ')"
+              casks=$(printf '%s\n' "$outdated" | grep -vxF "$pkg_casks" || true)
+            else
+              casks="$outdated"
+            fi
+
+            if [ -z "$casks" ]; then
+              log "no casks to upgrade"
+            else
+              # Intentional word splitting: one cask token per line.
+              # shellcheck disable=SC2086
+              "$BREW" upgrade --cask --yes $casks || failed="''${failed:+$failed, }brew-upgrade-cask"
+            fi
+          fi
         fi
 
         log "brew cleanup"
