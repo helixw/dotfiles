@@ -99,6 +99,7 @@
           "discord"
           "calibre"
           "steam"
+          "spotify"
         ];
         masApps = {};
         onActivation.cleanup = "zap";
