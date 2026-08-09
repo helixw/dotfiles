@@ -48,10 +48,14 @@
         failed=""
 
         log "brew update"
-        "$BREW" update || failed="$failed brew-update"
-
-        # Metadata is fresh from here on, so skip brew's own auto-update.
-        export HOMEBREW_NO_AUTO_UPDATE=1
+        # Metadata is fresh only when the update succeeded, so the suppression
+        # is set on that branch alone and a failed update leaves brew free to
+        # auto-update itself on the commands that follow.
+        if "$BREW" update; then
+          export HOMEBREW_NO_AUTO_UPDATE=1
+        else
+          failed="$failed brew-update"
+        fi
 
         # --yes because ask mode is brew's default and would hang unattended.
         log "brew upgrade (formulae)"
@@ -264,6 +268,9 @@
             "/usr/bin/lockf" "-t" "0" "-k" "/Users/helixw/Library/Caches/dotfiles-system-maintenance.lock"
             "/usr/bin/caffeinate" "-i" "${morningMaintenance}"
           ];
+          # Nothing here was asked for by the user at the keyboard, so launchd
+          # throttles its CPU and I/O rather than letting it disturb the session.
+          ProcessType = "Background";
           StartCalendarInterval = [ { Hour = 8; Minute = 0; } ];
           StandardOutPath = "/Users/helixw/Library/Logs/morning-maintenance.log";
           StandardErrorPath = "/Users/helixw/Library/Logs/morning-maintenance.log";
@@ -857,7 +864,9 @@
                   # against each other.
                   dr() {
                     local rc
-                    /usr/bin/lockf -t 0 -k "$HOME/Library/Caches/dotfiles-system-maintenance.lock" \
+                    # -s silences lockf, so a collision shows the message below
+                    # rather than a raw "already locked" line as well.
+                    /usr/bin/lockf -s -t 0 -k "$HOME/Library/Caches/dotfiles-system-maintenance.lock" \
                       sudo darwin-rebuild switch --flake ~/Code/dotfiles#aurelia
                     rc=$?
                     # 75 is EX_TEMPFAIL: lockf could not take the lock.
