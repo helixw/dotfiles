@@ -22,8 +22,10 @@
   outputs = inputs@{ self, nix-darwin, nixpkgs, nix-homebrew, home-manager, ... }: let
     # Paths two independent consumers must agree on: the scheduled agent and the
     # interactive `dr` take the same lock, and the agent's script and launchd's
-    # own redirects write the same log.
+    # own redirects write the same log. The stamp carries the date of the last
+    # run start, which is what makes the catch-up fire at most once a day.
     maintenanceLock = "/Users/helixw/Library/Caches/dotfiles-system-maintenance.lock";
+    maintenanceStamp = "/Users/helixw/Library/Caches/dotfiles-system-maintenance.last-run";
     maintenanceLog = "/Users/helixw/Library/Logs/morning-maintenance.log";
 
     configuration = { pkgs, config, ... }: let
@@ -37,17 +39,32 @@
 
         BREW=/opt/homebrew/bin/brew
         LOG="${maintenanceLog}"
+        STAMP="${maintenanceStamp}"
+        TODAY=$(date '+%Y-%m-%d')
 
         export PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
         export HOMEBREW_NO_ENV_HINTS=1
+
+        log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+        # The agent also runs at load, so a Mac that was asleep at 08:00 catches
+        # up at the next login. A day already covered exits here, which keeps
+        # every later login of that day silent apart from this one line.
+        if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$TODAY" ]; then
+          log "already ran today; skipping"
+          exit 0
+        fi
+
+        # Stamped at the start, not the end, so a run that dies midway still
+        # counts as today's attempt rather than re-firing at every login.
+        mkdir -p "$(dirname "$STAMP")"
+        printf '%s\n' "$TODAY" > "$STAMP"
 
         # Trim in place so launchd's append handle keeps pointing at this inode.
         if [ -f "$LOG" ] && [ "$(wc -l < "$LOG")" -gt 5000 ]; then
           tail -n 2000 "$LOG" > "$LOG.trim" && cat "$LOG.trim" > "$LOG"
           rm -f "$LOG.trim"
         fi
-
-        log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
         failed=""
 
@@ -267,18 +284,21 @@
       # run rather than queueing it, and the lock cannot go stale because the
       # kernel drops it when the holder dies.
       launchd.user.agents.morning-maintenance = {
+        # `command` rather than a literal ProgramArguments: nix-darwin wraps it
+        # as `/bin/sh -c "/bin/wait4path /nix/store && exec <command>"`, so a
+        # fire at login cannot start before the Nix store is mounted and find
+        # the script path missing.
+        command = "/usr/bin/lockf -t 0 -k ${maintenanceLock} /usr/bin/caffeinate -i ${morningMaintenance}";
         serviceConfig = {
-          ProgramArguments = [
-            "/usr/bin/lockf" "-t" "0" "-k" maintenanceLock
-            "/usr/bin/caffeinate" "-i" "${morningMaintenance}"
-          ];
           # Nothing here was asked for by the user at the keyboard, so launchd
           # throttles its CPU and I/O rather than letting it disturb the session.
           ProcessType = "Background";
           StartCalendarInterval = [ { Hour = 8; Minute = 0; } ];
           StandardOutPath = maintenanceLog;
           StandardErrorPath = maintenanceLog;
-          RunAtLoad = false;
+          # Catches up a missed 08:00 at the next login. The script's own date
+          # stamp is what keeps that to one real run a day.
+          RunAtLoad = true;
         };
       };
 
