@@ -40,7 +40,7 @@ After cloning, enable the in-repo git hooks (enforces [Conventional Commits](htt
 git config core.hooksPath .githooks
 ```
 
-This is a one-time setup per clone — git does not honour `core.hooksPath` automatically for security reasons.
+This is a one-time setup per clone, because git does not honour `core.hooksPath` automatically for security reasons.
 
 ## Structure
 
