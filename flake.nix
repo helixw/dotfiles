@@ -20,7 +20,69 @@
   };
 
   outputs = inputs@{ self, nix-darwin, nixpkgs, nix-homebrew, home-manager, ... }: let
-    configuration = { pkgs, config, ... }: {
+    configuration = { pkgs, config, ... }: let
+      # Unattended morning maintenance. Runs as the login user: no root, no
+      # secrets, and macOS updates are listed only, never installed. Casks whose
+      # artifact is a pkg installer need sudo, so they are skipped here and left
+      # to the interactive run (verified 2026-08-09: zoom ships
+      # zoomusInstallerFull.pkg, parsec ships parsec-macos.pkg).
+      morningMaintenance = pkgs.writeShellScript "morning-maintenance" ''
+        set -u
+
+        BREW=/opt/homebrew/bin/brew
+        LOG="$HOME/Library/Logs/morning-maintenance.log"
+
+        export PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+        export HOMEBREW_NO_ENV_HINTS=1
+
+        mkdir -p "$HOME/Library/Logs"
+
+        # Trim in place so launchd's append handle keeps pointing at this inode.
+        if [ -f "$LOG" ] && [ "$(wc -l < "$LOG")" -gt 5000 ]; then
+          tail -n 2000 "$LOG" > "$LOG.trim" && cat "$LOG.trim" > "$LOG"
+          rm -f "$LOG.trim"
+        fi
+
+        log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+        failed=""
+
+        log "brew update"
+        "$BREW" update || failed="$failed brew-update"
+
+        # Metadata is fresh from here on, so skip brew's own auto-update.
+        export HOMEBREW_NO_AUTO_UPDATE=1
+
+        # --yes because ask mode is brew's default and would hang unattended.
+        log "brew upgrade (formulae)"
+        "$BREW" upgrade --formula --yes || failed="$failed brew-upgrade-formula"
+
+        log "brew upgrade (casks, excluding pkg installers)"
+        casks=$("$BREW" outdated --cask --quiet | grep -vxF -e zoom -e parsec || true)
+        if [ -n "$casks" ]; then
+          # Intentional word splitting: one cask token per line.
+          # shellcheck disable=SC2086
+          "$BREW" upgrade --cask --yes $casks || failed="$failed brew-upgrade-cask"
+        else
+          log "no casks to upgrade"
+        fi
+
+        log "brew cleanup"
+        "$BREW" cleanup || failed="$failed brew-cleanup"
+
+        # Report only. Installing macOS updates needs root and stays manual.
+        log "softwareupdate --list"
+        /usr/sbin/softwareupdate --list 2>&1 || failed="$failed softwareupdate-list"
+
+        if [ -n "$failed" ]; then
+          log "FAILED:$failed"
+          /usr/bin/osascript -e "display notification \"Failed:$failed\" with title \"Morning maintenance\"" || true
+          exit 1
+        fi
+
+        log "done"
+      '';
+    in {
       # Package configuration
       nixpkgs.config.allowUnfree = true;
       
@@ -183,8 +245,36 @@
       # Set primary user for system-wide activation
       system.primaryUser = "helixw";
 
+      # Touch ID for interactive sudo. reattach keeps it working inside tmux and
+      # screen, which run outside the bootstrap session PAM ties the prompt to.
+      security.pam.services.sudo_local = {
+        enable = true;
+        touchIdAuth = true;
+        reattach = true;
+      };
+
+      # Unattended morning maintenance, daily at 08:00. lockf(1) holds a kernel
+      # flock for the whole run, so the interactive `dr` (which takes the same
+      # file) cannot run brew at the same time; -t 0 means a collision skips this
+      # run rather than queueing it, and the lock cannot go stale because the
+      # kernel drops it when the holder dies.
+      launchd.user.agents.morning-maintenance = {
+        serviceConfig = {
+          ProgramArguments = [
+            "/usr/bin/lockf" "-t" "0" "-k" "/Users/helixw/Library/Caches/dotfiles-system-maintenance.lock"
+            "/usr/bin/caffeinate" "-i" "${morningMaintenance}"
+          ];
+          StartCalendarInterval = [ { Hour = 8; Minute = 0; } ];
+          StandardOutPath = "/Users/helixw/Library/Logs/morning-maintenance.log";
+          StandardErrorPath = "/Users/helixw/Library/Logs/morning-maintenance.log";
+          RunAtLoad = false;
+        };
+      };
+
       # Nix daemon configuration
-      # Disable nix-darwin's Nix management (using Determinate Nix)
+      # Disable nix-darwin's Nix management: the daemon is owned by upstream
+      # Nix's own multi-user install (/Library/LaunchDaemons/org.nixos.nix-daemon.plist),
+      # so letting nix-darwin manage it too would give the daemon two owners.
       nix.enable = false;
 
       # Shell configuration
@@ -760,8 +850,22 @@
 
                   # Useful aliases
                   alias ll="ls -lah"
-                  alias dr="sudo darwin-rebuild switch --flake ~/Code/dotfiles#aurelia"
                   alias claude="caffeinate -dims claude"
+
+                  # Rebuild the system, holding the same lock the scheduled
+                  # morning-maintenance agent takes, so the two never run brew
+                  # against each other.
+                  dr() {
+                    local rc
+                    /usr/bin/lockf -t 0 -k "$HOME/Library/Caches/dotfiles-system-maintenance.lock" \
+                      sudo darwin-rebuild switch --flake ~/Code/dotfiles#aurelia
+                    rc=$?
+                    # 75 is EX_TEMPFAIL: lockf could not take the lock.
+                    if [ $rc -eq 75 ]; then
+                      echo "dr: morning maintenance is running; try again shortly." >&2
+                    fi
+                    return $rc
+                  }
                   
                   # Git aliases
                   alias gs="git status"
