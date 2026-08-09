@@ -58,33 +58,33 @@
         if "$BREW" update; then
           export HOMEBREW_NO_AUTO_UPDATE=1
         else
-          failed="$failed brew-update"
+          failed="''${failed:+$failed, }brew-update"
         fi
 
         # --yes because ask mode is brew's default and would hang unattended.
         log "brew upgrade (formulae)"
-        "$BREW" upgrade --formula --yes || failed="$failed brew-upgrade-formula"
+        "$BREW" upgrade --formula --yes || failed="''${failed:+$failed, }brew-upgrade-formula"
 
         log "brew upgrade (casks, excluding pkg installers)"
         casks=$("$BREW" outdated --cask --quiet | grep -vxF -e zoom -e parsec || true)
         if [ -n "$casks" ]; then
           # Intentional word splitting: one cask token per line.
           # shellcheck disable=SC2086
-          "$BREW" upgrade --cask --yes $casks || failed="$failed brew-upgrade-cask"
+          "$BREW" upgrade --cask --yes $casks || failed="''${failed:+$failed, }brew-upgrade-cask"
         else
           log "no casks to upgrade"
         fi
 
         log "brew cleanup"
-        "$BREW" cleanup || failed="$failed brew-cleanup"
+        "$BREW" cleanup || failed="''${failed:+$failed, }brew-cleanup"
 
         # Report only. Installing macOS updates needs root and stays manual.
         log "softwareupdate --list"
-        /usr/sbin/softwareupdate --list || failed="$failed softwareupdate-list"
+        /usr/sbin/softwareupdate --list || failed="''${failed:+$failed, }softwareupdate-list"
 
         if [ -n "$failed" ]; then
-          log "FAILED:$failed"
-          /usr/bin/osascript -e "display notification \"Failed:$failed\" with title \"Morning maintenance\"" || true
+          log "FAILED: $failed"
+          /usr/bin/osascript -e "display notification \"Failed: $failed\" with title \"Morning Maintenance\"" || true
           exit 1
         fi
 
