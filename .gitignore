@@ -9,3 +9,6 @@ node_modules
 .env.test
 .env.production
 .env.local
+
+# nix-darwin build symlink
+result
