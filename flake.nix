@@ -20,6 +20,12 @@
   };
 
   outputs = inputs@{ self, nix-darwin, nixpkgs, nix-homebrew, home-manager, ... }: let
+    # Paths two independent consumers must agree on: the scheduled agent and the
+    # interactive `dr` take the same lock, and the agent's script and launchd's
+    # own redirects write the same log.
+    maintenanceLock = "/Users/helixw/Library/Caches/dotfiles-system-maintenance.lock";
+    maintenanceLog = "/Users/helixw/Library/Logs/morning-maintenance.log";
+
     configuration = { pkgs, config, ... }: let
       # Unattended morning maintenance. Runs as the login user: no root, no
       # secrets, and macOS updates are listed only, never installed. Casks whose
@@ -30,12 +36,10 @@
         set -u
 
         BREW=/opt/homebrew/bin/brew
-        LOG="$HOME/Library/Logs/morning-maintenance.log"
+        LOG="${maintenanceLog}"
 
         export PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
         export HOMEBREW_NO_ENV_HINTS=1
-
-        mkdir -p "$HOME/Library/Logs"
 
         # Trim in place so launchd's append handle keeps pointing at this inode.
         if [ -f "$LOG" ] && [ "$(wc -l < "$LOG")" -gt 5000 ]; then
@@ -76,7 +80,7 @@
 
         # Report only. Installing macOS updates needs root and stays manual.
         log "softwareupdate --list"
-        /usr/sbin/softwareupdate --list 2>&1 || failed="$failed softwareupdate-list"
+        /usr/sbin/softwareupdate --list || failed="$failed softwareupdate-list"
 
         if [ -n "$failed" ]; then
           log "FAILED:$failed"
@@ -265,15 +269,15 @@
       launchd.user.agents.morning-maintenance = {
         serviceConfig = {
           ProgramArguments = [
-            "/usr/bin/lockf" "-t" "0" "-k" "/Users/helixw/Library/Caches/dotfiles-system-maintenance.lock"
+            "/usr/bin/lockf" "-t" "0" "-k" maintenanceLock
             "/usr/bin/caffeinate" "-i" "${morningMaintenance}"
           ];
           # Nothing here was asked for by the user at the keyboard, so launchd
           # throttles its CPU and I/O rather than letting it disturb the session.
           ProcessType = "Background";
           StartCalendarInterval = [ { Hour = 8; Minute = 0; } ];
-          StandardOutPath = "/Users/helixw/Library/Logs/morning-maintenance.log";
-          StandardErrorPath = "/Users/helixw/Library/Logs/morning-maintenance.log";
+          StandardOutPath = maintenanceLog;
+          StandardErrorPath = maintenanceLog;
           RunAtLoad = false;
         };
       };
@@ -866,7 +870,7 @@
                     local rc
                     # -s silences lockf, so a collision shows the message below
                     # rather than a raw "already locked" line as well.
-                    /usr/bin/lockf -s -t 0 -k "$HOME/Library/Caches/dotfiles-system-maintenance.lock" \
+                    /usr/bin/lockf -s -t 0 -k "${maintenanceLock}" \
                       sudo darwin-rebuild switch --flake ~/Code/dotfiles#aurelia
                     rc=$?
                     # 75 is EX_TEMPFAIL: lockf could not take the lock.

@@ -26,7 +26,7 @@ Subsequent updates:
 sudo darwin-rebuild switch --flake ~/Code/dotfiles#aurelia
 ```
 
-Or use the configured alias:
+Or use the configured `dr` function:
 
 ```bash
 dr
