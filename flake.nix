@@ -100,6 +100,7 @@
           "calibre"
           "steam"
           "spotify"
+          "fliqlo"
         ];
         masApps = {};
         onActivation.cleanup = "zap";
