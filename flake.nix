@@ -189,6 +189,20 @@
           "shellcheck"
           "poppler"
           "btop"
+          # The container runtime the private-office hub runs on. colima hosts
+          # the Linux VM, docker is the client alone (the daemon lives in that
+          # VM), and docker-compose is the CLI plugin the hub's `office setup`
+          # drives. Verified live 2026-08-18 on formulae.brew.sh: colima 0.10.3
+          # (MIT, depends on lima, which brew installs with it), docker 29.7.2
+          # (Apache 2.0, "the daemon component is provided in a separate
+          # formula" and is not wanted here), docker-compose 5.5.0 (Apache 2.0),
+          # whose own caveat is that the CLI finds the plugin only once
+          # ~/.docker/config.json names cliPluginsExtraDirs. That file stays
+          # unmanaged on purpose: docker writes its current context into it, so
+          # a read only copy declared here would break `docker context`.
+          "colima"
+          "docker"
+          "docker-compose"
           { name = "oven-sh/bun/bun"; trusted = true; }
         ];
         casks = [
