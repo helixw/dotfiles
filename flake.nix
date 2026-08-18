@@ -197,9 +197,11 @@
           # (Apache 2.0, "the daemon component is provided in a separate
           # formula" and is not wanted here), docker-compose 5.5.0 (Apache 2.0),
           # whose own caveat is that the CLI finds the plugin only once
-          # ~/.docker/config.json names cliPluginsExtraDirs. That file stays
-          # unmanaged on purpose: docker writes its current context into it, so
-          # a read only copy declared here would break `docker context`.
+          # ~/.docker/config.json names cliPluginsExtraDirs. That file is never
+          # declared here: docker writes its current context into it, so a read
+          # only copy would break `docker context`. The key is added instead by
+          # the registerDockerCliPlugins home activation entry below, which
+          # merges it in place and leaves every other key docker owns alone.
           "colima"
           "docker"
           "docker-compose"
@@ -1016,6 +1018,66 @@
                   export FONTCONFIG_FILE="${pkgs.fontconfig.out}/etc/fonts/fonts.conf"
                   ${pkgs.fontconfig}/bin/fc-cache -f
                 '';
+
+                # Docker CLI plugin directory registration
+                registerDockerCliPlugins = config.lib.dag.entryAfter [ "writeBoundary" ] (
+                  let
+                    mergeScript = pkgs.writeText "register-docker-cli-plugins.py" ''
+                      import json
+                      import sys
+
+                      PLUGIN_DIR = "/opt/homebrew/lib/docker/cli-plugins"
+
+                      path = sys.argv[1]
+
+                      with open(path) as handle:
+                          text = handle.read().strip()
+
+                      try:
+                          config = json.loads(text) if text else {}
+                      except ValueError as error:
+                          sys.exit("docker config is not valid JSON: " + str(error))
+                      if not isinstance(config, dict):
+                          sys.exit("docker config root is not a JSON object")
+
+                      dirs = config.get("cliPluginsExtraDirs")
+                      if not isinstance(dirs, list):
+                          dirs = []
+                      if PLUGIN_DIR in dirs:
+                          sys.exit(0)
+
+                      config["cliPluginsExtraDirs"] = dirs + [PLUGIN_DIR]
+
+                      # Truncating in place keeps the inode, owner and mode 600 that
+                      # docker itself created the file with.
+                      with open(path, "w") as handle:
+                          json.dump(config, handle, indent="\t")
+                          handle.write("\n")
+
+                      print("registered the Homebrew docker CLI plugin directory in " + path)
+                    '';
+                  in
+                  ''
+                    # brew installs the docker-compose plugin under the Homebrew
+                    # prefix, which the docker CLI searches only once
+                    # ~/.docker/config.json names it in cliPluginsExtraDirs. The file
+                    # stays docker owned, so this merges that one key in place and
+                    # preserves every other key it carries, currentContext included;
+                    # a rerun that finds the key already there writes nothing.
+                    DOCKER_CONFIG_FILE="$HOME/.docker/config.json"
+
+                    mkdir -p "$HOME/.docker"
+                    if [ ! -e "$DOCKER_CONFIG_FILE" ]; then
+                      (umask 077; echo '{}' > "$DOCKER_CONFIG_FILE")
+                    fi
+
+                    # Guarded so a config.json this cannot parse warns and leaves the
+                    # file alone rather than failing the whole activation.
+                    if ! ${pkgs.python3}/bin/python3 ${mergeScript} "$DOCKER_CONFIG_FILE"; then
+                      warnEcho "docker CLI plugin directory not registered, $DOCKER_CONFIG_FILE left unchanged"
+                    fi
+                  ''
+                );
               };
             };
           };
