@@ -1,10 +1,30 @@
 #!/usr/bin/env bash
-# Enforce Conventional Commits (https://www.conventionalcommits.org/).
+# Enforce Conventional Commits (https://www.conventionalcommits.org/), and
+# reject co-author attribution.
 # Enabled per clone via: git config core.hooksPath .githooks
 set -euo pipefail
 
 commit_msg_file="$1"
 first_line=$(head -n1 "$commit_msg_file")
+
+# Every commit here carries exactly one author, the repo owner. Agent harnesses
+# append a co-author trailer by default, which renders as a second author on
+# GitHub, so it is rejected before it can reach history. Checked ahead of the
+# merge skip below, because a generated commit must not be a way around it. The
+# match is anchored to the line start, so a mention inside the body, or in a
+# comment line git will strip, still passes.
+if grep -qiE '^[[:space:]]*Co-Authored-By:' "$commit_msg_file"; then
+  cat >&2 <<'EOF'
+Commit message carries co-author attribution.
+
+  Every commit in this repo is authored solely by Shreyas Khan
+  <shreyas.khan@hotmail.com>. Remove the co-author trailer and commit again.
+
+  If your tooling adds it automatically, turn that off rather than
+  bypassing this hook: --no-verify is not an option here.
+EOF
+  exit 1
+fi
 
 # Skip git-generated commits (merge, revert, fixup/squash during rebase).
 if [[ "$first_line" =~ ^(Merge|Revert|fixup!|squash!|amend!) ]]; then
