@@ -27,6 +27,14 @@
     maintenanceLock = "/Users/helixw/Library/Caches/dotfiles-system-maintenance.lock";
     maintenanceStamp = "/Users/helixw/Library/Caches/dotfiles-system-maintenance.last-run";
     maintenanceLog = "/Users/helixw/Library/Logs/morning-maintenance.log";
+    # The private-office hub asks for an off-schedule maintenance run by dropping
+    # a trigger file here; launchd watches this directory and the script consumes
+    # what it finds. It is created at activation because launchd can only watch a
+    # path that exists when the job is loaded. The directory is maintenance-owned
+    # today: a second routine wanting a trigger gets its own watched directory
+    # rather than sharing this one, since this watcher consumes every file it
+    # sees.
+    maintenanceTriggerDir = "/Users/helixw/.private-office/triggers";
 
     configuration = { pkgs, config, ... }: let
       # Unattended morning maintenance. Runs as the login user: no root, no
@@ -41,6 +49,7 @@
         BREW=/opt/homebrew/bin/brew
         LOG="${maintenanceLog}"
         STAMP="${maintenanceStamp}"
+        TRIGGERS="${maintenanceTriggerDir}"
         TODAY=$(date '+%Y-%m-%d')
 
         export PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
@@ -48,10 +57,32 @@
 
         log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
+        # Two ways in, one script. A SCHEDULED run (08:00, or the catch-up at
+        # load) dedupes on the date stamp below and is unchanged. A TRIGGERED
+        # run, which the private-office hub asks for by dropping a JSON file of
+        # {requested_at, force} into $TRIGGERS, bypasses that stamp when force is
+        # true, for that run alone. The trigger is consumed before any work, so a
+        # run that dies midway cannot re-fire forever. Consuming it modifies the
+        # watched directory and so queues one more launch: that launch finds no
+        # trigger and today's stamp and exits at the check below, which is why a
+        # forced run still writes the stamp.
+        force=0
+        if [ -d "$TRIGGERS" ]; then
+          trigger=$(find "$TRIGGERS" -maxdepth 1 -type f -print | head -n 1)
+          if [ -n "$trigger" ]; then
+            requested_at=$(jq -r '.requested_at // "unknown"' < "$trigger" 2>/dev/null || echo unknown)
+            if [ "$(jq -r '.force // false' < "$trigger" 2>/dev/null)" = "true" ]; then
+              force=1
+            fi
+            find "$TRIGGERS" -maxdepth 1 -type f -delete
+            log "trigger consumed (requested_at $requested_at, force $force)"
+          fi
+        fi
+
         # The agent also runs at load, so a Mac that was asleep at 08:00 catches
         # up at the next login. A day already covered exits here, which keeps
         # every later login of that day silent apart from this one line.
-        if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$TODAY" ]; then
+        if [ "$force" -eq 0 ] && [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$TODAY" ]; then
           log "already ran today; skipping"
           exit 0
         fi
@@ -78,6 +109,10 @@
         else
           failed="''${failed:+$failed, }brew-update"
         fi
+
+        # Captured before the upgrade, so the verification phase below knows
+        # which formulae moved and therefore whose dependents can be orphaned.
+        outdated_formulae=$("$BREW" outdated --formula --quiet || true)
 
         # --yes because ask mode is brew's default and would hang unattended.
         log "brew upgrade (formulae)"
@@ -120,6 +155,99 @@
               # Intentional word splitting: one cask token per line.
               # shellcheck disable=SC2086
               "$BREW" upgrade --cask --yes $casks || failed="''${failed:+$failed, }brew-upgrade-cask"
+            fi
+          fi
+        fi
+
+        # Post-upgrade linkage verification, repaired in the same run.
+        #
+        # WORKED CASE, 2026-08-18: simdutf moved to 9.1.0, which ships
+        # libsimdutf.35 only, while the installed merve 1.2.2_1 still linked
+        # libsimdutf.34, so every Homebrew node invocation aborted on a dyld
+        # "Library not loaded" and exited 134. Nothing in the run noticed.
+        #
+        # DETECTOR, chosen on evidence rather than on the obvious candidates:
+        #   * `brew missing` does not see this class at all (verified
+        #     2026-08-18: no output, exit 0, while node was aborting).
+        #   * `brew linkage` does see it, but it is a developer command and
+        #     switches Homebrew's developer mode on in order to run. That mode
+        #     is off on this machine and deliberately kept off, and an
+        #     unattended job is the wrong thing to turn it on.
+        #   * Running each dependent with --version and reading the exit code is
+        #     neither side-effect free nor reliable: pdftotext reads --version
+        #     as an input FILENAME and does file I/O for it, and a binary that
+        #     merely rejects an unknown flag exits nonzero having loaded fine.
+        # So this reads Mach-O load commands and executes nothing: otool -L over
+        # each candidate's own binaries and libraries, flagging absolute
+        # references under the Homebrew prefix whose target no longer exists.
+        # That is the exact shape of the merve break, whose dylib names
+        # /opt/homebrew/opt/simdutf/lib/libsimdutf.NN.dylib outright, and the
+        # file carrying the dangling reference names the formula to repair.
+        # References under /usr/lib are skipped on purpose: they live in the
+        # dyld shared cache and have no file on disk to test. Symlinked entries
+        # are skipped too, since the real file sits in its OWN formula's prefix
+        # and that formula is scanned under its own name.
+        #
+        # Prints one formula name per line.
+        broken_formulae() {
+          for bf_name in "$@"; do
+            bf_prefix=$("$BREW" --prefix --installed "$bf_name" 2>/dev/null) || continue
+            [ -n "$bf_prefix" ] || continue
+            find -H "$bf_prefix/bin" "$bf_prefix/sbin" "$bf_prefix/lib" \
+              -maxdepth 2 -type f -print 2>/dev/null |
+            while read -r bf_file; do
+              /usr/bin/otool -L "$bf_file" 2>/dev/null |
+                sed -n 's|^[[:space:]]*\(/opt/homebrew/[^[:space:]]*\).*|\1|p' |
+                while read -r bf_target; do
+                  if [ ! -e "$bf_target" ]; then
+                    printf '%s\n' "$bf_name"
+                  fi
+                done
+            done
+          done | sort -u
+        }
+
+        log "verifying linkage of upgraded formulae and their dependents"
+        if [ -z "$outdated_formulae" ]; then
+          log "no formulae were upgraded; nothing to verify"
+        else
+          # `brew uses` intersects when given several formulae at once, so the
+          # dependents are resolved one upgraded formula at a time.
+          candidates=$(
+            printf '%s\n' "$outdated_formulae"
+            for uf in $outdated_formulae; do
+              "$BREW" uses --installed --recursive --formula "$uf" 2>/dev/null
+            done
+          )
+          candidates=$(printf '%s\n' "$candidates" | sort -u)
+          # Intentional word splitting: one formula token per line.
+          # shellcheck disable=SC2086
+          broken=$(broken_formulae $candidates)
+
+          if [ -z "$broken" ]; then
+            log "linkage clean across $(printf '%s\n' "$candidates" | wc -l | tr -d ' ') formulae"
+          else
+            log "orphaned linkage: $(printf '%s' "$broken" | tr '\n' ' ')"
+            # Only the orphaned formula is touched. Repouring it relinks it
+            # against the prefix as it now stands, which is what the upgrade
+            # ordering left stale; a bare `brew upgrade` of everything would be
+            # a second, unscoped upgrade phase and is never run here.
+            for bf in $broken; do
+              log "repairing $bf (brew reinstall)"
+              "$BREW" reinstall --formula "$bf" || log "reinstall of $bf failed"
+            done
+
+            # Intentional word splitting: one formula token per line.
+            # shellcheck disable=SC2086
+            still_broken=$(broken_formulae $broken)
+            if [ -n "$still_broken" ]; then
+              # Repouring cannot fix a formula whose published bottle is itself
+              # built against a version that is gone; that needs the user.
+              log "STILL BROKEN after repair: $(printf '%s' "$still_broken" | tr '\n' ' ')"
+              failed="''${failed:+$failed, }brew-linkage-unrepaired"
+            else
+              log "repaired: $(printf '%s' "$broken" | tr '\n' ' ')"
+              /usr/bin/osascript -e "display notification \"Repaired: $(printf '%s' "$broken" | tr '\n' ' ')\" with title \"Morning Maintenance\"" || true
             fi
           fi
         fi
@@ -177,6 +305,12 @@
           "fastfetch"
           "gnupg"
           "pinentry-mac"
+          # node and node@22 coexist DELIBERATELY: node@22 is Evidence's pinned
+          # runtime for the wealth dashboard, plain node serves everything else.
+          # Neither is redundant, so a future cleanup must not read the pair as a
+          # mistake. The pair does share one Homebrew prefix, which is how a
+          # partial dependency upgrade orphaned merve on 2026-08-18; the
+          # verifyLinkage phase of morningMaintenance below is what repairs that.
           "node"
           "node@22"
           "python"
@@ -342,6 +476,12 @@
           # throttles its CPU and I/O rather than letting it disturb the session.
           ProcessType = "Background";
           StartCalendarInterval = [ { Hour = 8; Minute = 0; } ];
+          # The hub's on-demand path. Dropping a trigger file into this
+          # directory starts the same job the schedule starts; which of the two
+          # fired is read from the trigger file itself, so there is one script
+          # and one lock rather than a second agent shadowing this one. lockf
+          # already serializes a trigger that lands mid-run.
+          WatchPaths = [ maintenanceTriggerDir ];
           StandardOutPath = maintenanceLog;
           StandardErrorPath = maintenanceLog;
           # Catches up a missed 08:00 at the next login. The script's own date
@@ -397,6 +537,10 @@
               home.activation.createDirectories = config.lib.dag.entryAfter [ "writeBoundary" ] ''
                 mkdir -p "$HOME/.config/vim"
                 mkdir -p "$HOME/.gnupg"
+                # launchd can only watch a path that exists when the job loads,
+                # so the maintenance trigger directory is created here rather
+                # than left for the hub's first write.
+                mkdir -p "${maintenanceTriggerDir}"
               '';
 
               # Configuration file management
