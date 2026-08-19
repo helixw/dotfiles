@@ -37,6 +37,17 @@
     # one that ever denotes a complete document and the watcher reads nothing
     # else.
     maintenanceTriggerDir = "/Users/helixw/.private-office/triggers";
+    # The SECOND watched directory the rule above promised, for the hub's
+    # Shopping Research routine, and its own log and lock. Same contract, one
+    # exact filename: the hub writes shopping-research.json into this directory
+    # and nothing else here is ever read.
+    #
+    # WHY IT RUNS HERE AT ALL: the routine spawns the `claude` CLI on the user's
+    # own subscription, and that binary and its credentials live on this Mac and
+    # not in the hub's image, so the container can only ask.
+    shoppingTriggerDir = "/Users/helixw/.private-office/triggers-shopping";
+    shoppingLock = "/Users/helixw/Library/Caches/private-office-shopping-research.lock";
+    shoppingLog = "/Users/helixw/Library/Logs/shopping-research.log";
 
     configuration = { pkgs, config, ... }: let
       # Unattended morning maintenance. Runs as the login user: no root, no
@@ -281,6 +292,89 @@
 
         log "done"
       '';
+
+      # The private-office hub's Shopping Research routine, run HERE because the
+      # hub serves from a container and the `claude` CLI it spawns, with the
+      # user's subscription credentials, is on this machine.
+      #
+      # IT HOLDS NO COPY OF THE ROUTINE. The work is one call into that repo's
+      # own CLI, so the run this starts is byte for byte the run a terminal
+      # starts and there is nothing here to drift from it. What this script owns
+      # is only the trigger contract: read one exact filename, consume it, and
+      # decide whether to run.
+      shoppingResearch = pkgs.writeShellScript "shopping-research" ''
+        set -u
+
+        BUN=/opt/homebrew/bin/bun
+        APP=/Users/helixw/Code/private-office/app
+        TRIGGERS="${shoppingTriggerDir}"
+        LOG="${shoppingLog}"
+        trigger="$TRIGGERS/shopping-research.json"
+
+        # PATH resolves bun and claude; HOME and USER are exported rather than
+        # inherited because the routine passes exactly these three on to the
+        # `claude` child (that repo's enrich.ts states the measurement, USER
+        # being what reaches the subscription), and a launchd job is not a login
+        # shell.
+        export PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+        export HOME=/Users/helixw
+        export USER=helixw
+
+        log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+        # NO SCHEDULE AND NO CATCH-UP, which is the one place this differs from
+        # morning maintenance above: every run here was asked for by a person a
+        # moment ago, so there is no dedupe stamp to keep and nothing to catch up
+        # on. The job fires on a change to the watched directory alone, and a
+        # trigger written while this agent was not loaded is simply picked up at
+        # the next press, which rewrites the same filename and is itself the
+        # change that fires this.
+        if [ ! -f "$trigger" ]; then
+          log "no trigger present; nothing to do"
+          exit 0
+        fi
+
+        requested_at=$(jq -r '.requested_at // "unknown"' < "$trigger" 2>/dev/null || echo unknown)
+        force=$(jq -r '.force // false' < "$trigger" 2>/dev/null || echo false)
+        # Consumed BEFORE any work, so a run that dies midway cannot re-fire
+        # forever. Consuming it modifies the watched directory and so queues one
+        # more launch, which finds no trigger and exits at the check above.
+        rm -f "$trigger"
+
+        # ONLY that exact name is ever read or deleted. The hub writes
+        # <uuid>.writing and renames it onto shopping-research.json, so the
+        # rename is what publishes a complete document; taking any file the
+        # directory happens to hold would let this job read and unlink a temp
+        # mid-write and destroy the atomicity the rename exists to buy. A
+        # leftover temp means a hub write died partway: it is reported and left
+        # alone, being the hub's to clean up, which it does at its next write.
+        residue=$(find "$TRIGGERS" -maxdepth 1 -type f ! -name shopping-research.json -print 2>/dev/null | head -n 5)
+        if [ -n "$residue" ]; then
+          log "unexpected residue in $TRIGGERS, left in place: $(printf '%s' "$residue" | tr '\n' ' ')"
+        fi
+
+        # force is what makes a document a REQUEST rather than a file that
+        # happens to be there, so a payload without it is consumed and not acted
+        # on. It is the same flag maintenance honours, doing the job its own
+        # design gives it here: this routine has no dedupe for it to bypass.
+        if [ "$force" != "true" ]; then
+          log "trigger consumed (requested_at $requested_at) with force unset; not running"
+          exit 0
+        fi
+
+        log "trigger consumed (requested_at $requested_at); running Shopping Research"
+        if "$BUN" run --cwd "$APP" office run shopping-enrichment; then
+          log "done"
+        else
+          rc=$?
+          # The hub cannot report this. Its status row reads the run state of its
+          # OWN process, and this run is not in it, so a failure here is visible
+          # nowhere on screen unless it is said out loud.
+          log "FAILED (exit $rc)"
+          /usr/bin/osascript -e "display notification \"The run failed (exit $rc); see $LOG\" with title \"Shopping Research\"" || true
+          exit 1
+        fi
+      '';
     in {
       # Package configuration
       nixpkgs.config.allowUnfree = true;
@@ -504,6 +598,31 @@
         };
       };
 
+      # The hub's Shopping Research, run on demand and ONLY on demand. It is the
+      # second consumer of the trigger idiom above and deliberately the plainer
+      # one: no calendar entry and no RunAtLoad, because nothing here is owed on
+      # a schedule and every run was pressed by a person seconds earlier.
+      launchd.user.agents.shopping-research = {
+        # lockf for the same reason the agent above takes one, and its scope is
+        # stated rather than assumed: it serializes anything that takes THIS
+        # file, which today is this job alone, launchd itself already running one
+        # instance of a job at a time. What it does NOT cover is a hand-run
+        # `office run shopping-enrichment` in a terminal, which takes no lock; a
+        # sweep only ever writes items whose name is still null, so the cost of
+        # that overlap is duplicated work on the user's own subscription rather
+        # than a damaged store. -t 0 means a collision skips this launch, leaving
+        # the trigger unconsumed for the next press to re-fire.
+        command = "/usr/bin/lockf -t 0 -k ${shoppingLock} /usr/bin/caffeinate -i ${shoppingResearch}";
+        serviceConfig = {
+          ProcessType = "Background";
+          # The whole trigger: a change in this directory starts the job, which
+          # reads the one filename it consumes and exits when there is none.
+          WatchPaths = [ shoppingTriggerDir ];
+          StandardOutPath = shoppingLog;
+          StandardErrorPath = shoppingLog;
+        };
+      };
+
       # Nix daemon configuration
       # Disable nix-darwin's Nix management: the daemon is owned by upstream
       # Nix's own multi-user install (/Library/LaunchDaemons/org.nixos.nix-daemon.plist),
@@ -552,9 +671,10 @@
                 mkdir -p "$HOME/.config/vim"
                 mkdir -p "$HOME/.gnupg"
                 # launchd can only watch a path that exists when the job loads,
-                # so the maintenance trigger directory is created here rather
-                # than left for the hub's first write.
+                # so each trigger directory is created here rather than left for
+                # the hub's first write. One per watching job.
                 mkdir -p "${maintenanceTriggerDir}"
+                mkdir -p "${shoppingTriggerDir}"
               '';
 
               # Configuration file management
