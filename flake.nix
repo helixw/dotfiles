@@ -27,13 +27,15 @@
     maintenanceLock = "/Users/helixw/Library/Caches/dotfiles-system-maintenance.lock";
     maintenanceStamp = "/Users/helixw/Library/Caches/dotfiles-system-maintenance.last-run";
     maintenanceLog = "/Users/helixw/Library/Logs/morning-maintenance.log";
-    # The private-office hub asks for an off-schedule maintenance run by dropping
-    # a trigger file here; launchd watches this directory and the script consumes
-    # what it finds. It is created at activation because launchd can only watch a
-    # path that exists when the job is loaded. The directory is maintenance-owned
-    # today: a second routine wanting a trigger gets its own watched directory
-    # rather than sharing this one, since this watcher consumes every file it
-    # sees.
+    # The private-office hub asks for an off-schedule maintenance run by writing
+    # a trigger here; launchd watches this directory. It is created at activation
+    # because launchd can only watch a path that exists when the job is loaded.
+    # Two rules hold. ACROSS routines, a second one wanting a trigger gets its
+    # OWN watched directory rather than sharing this one. WITHIN this directory
+    # the contract is ONE EXACT FILENAME, maintenance.json: the hub writes
+    # <uuid>.writing and renames it onto that name, so the final name is the only
+    # one that ever denotes a complete document and the watcher reads nothing
+    # else.
     maintenanceTriggerDir = "/Users/helixw/.private-office/triggers";
 
     configuration = { pkgs, config, ... }: let
@@ -59,23 +61,35 @@
 
         # Two ways in, one script. A SCHEDULED run (08:00, or the catch-up at
         # load) dedupes on the date stamp below and is unchanged. A TRIGGERED
-        # run, which the private-office hub asks for by dropping a JSON file of
-        # {requested_at, force} into $TRIGGERS, bypasses that stamp when force is
-        # true, for that run alone. The trigger is consumed before any work, so a
-        # run that dies midway cannot re-fire forever. Consuming it modifies the
-        # watched directory and so queues one more launch: that launch finds no
-        # trigger and today's stamp and exits at the check below, which is why a
-        # forced run still writes the stamp.
+        # run, which the private-office hub asks for by writing a JSON object of
+        # {requested_at, force} to $TRIGGERS/maintenance.json, bypasses that
+        # stamp when force is true, for that run alone. The trigger is consumed
+        # before any work, so a run that dies midway cannot re-fire forever.
+        # Consuming it modifies the watched directory and so queues one more
+        # launch: that launch finds no trigger and today's stamp and exits at the
+        # check below, which is why a forced run still writes the stamp.
         force=0
+        trigger="$TRIGGERS/maintenance.json"
+        if [ -f "$trigger" ]; then
+          requested_at=$(jq -r '.requested_at // "unknown"' < "$trigger" 2>/dev/null || echo unknown)
+          if [ "$(jq -r '.force // false' < "$trigger" 2>/dev/null)" = "true" ]; then
+            force=1
+          fi
+          rm -f "$trigger"
+          log "trigger consumed (requested_at $requested_at, force $force)"
+        fi
+
+        # ONLY that exact name is ever read or deleted. The hub writes
+        # <uuid>.writing and renames it onto maintenance.json, so the rename is
+        # what publishes a complete document; taking any file the directory
+        # happens to hold would let this job read and unlink a temp mid-write and
+        # destroy the atomicity that rename exists to buy. A leftover temp means
+        # a hub write died partway, which is reported and left alone: it is the
+        # hub's to clean up, not this job's.
         if [ -d "$TRIGGERS" ]; then
-          trigger=$(find "$TRIGGERS" -maxdepth 1 -type f -print | head -n 1)
-          if [ -n "$trigger" ]; then
-            requested_at=$(jq -r '.requested_at // "unknown"' < "$trigger" 2>/dev/null || echo unknown)
-            if [ "$(jq -r '.force // false' < "$trigger" 2>/dev/null)" = "true" ]; then
-              force=1
-            fi
-            find "$TRIGGERS" -maxdepth 1 -type f -delete
-            log "trigger consumed (requested_at $requested_at, force $force)"
+          residue=$(find "$TRIGGERS" -maxdepth 1 -type f ! -name maintenance.json -print 2>/dev/null | head -n 5)
+          if [ -n "$residue" ]; then
+            log "unexpected residue in $TRIGGERS, left in place: $(printf '%s' "$residue" | tr '\n' ' ')"
           fi
         fi
 
