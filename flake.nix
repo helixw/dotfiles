@@ -444,8 +444,16 @@
           # only copy would break `docker context`. The key is added instead by
           # the registerDockerCliPlugins home activation entry below, which
           # merges it in place and leaves every other key docker owns alone.
+          # docker-buildx 0.36.1 (Apache 2.0, verified live 2026-08-23 on
+          # formulae.brew.sh) joins them because compose refuses to build
+          # without it, printing "Docker Compose requires buildx plugin to be
+          # installed", which is what the private-office hub's compose build
+          # hits. Its formula symlinks the plugin into that same
+          # /opt/homebrew/lib/docker/cli-plugins, so the registration entry
+          # below already reaches it and it needs no wiring of its own.
           "colima"
           "docker"
+          "docker-buildx"
           "docker-compose"
           { name = "oven-sh/bun/bun"; trusted = true; }
         ];
@@ -1336,8 +1344,9 @@
                     '';
                   in
                   ''
-                    # brew installs the docker-compose plugin under the Homebrew
-                    # prefix, which the docker CLI searches only once
+                    # brew installs the docker CLI plugins (compose, buildx)
+                    # under the Homebrew prefix, which the docker CLI searches
+                    # only once
                     # ~/.docker/config.json names it in cliPluginsExtraDirs. The file
                     # stays docker owned, so this merges that one key in place and
                     # preserves every other key it carries, currentContext included;
