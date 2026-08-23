@@ -467,8 +467,16 @@
           "nikitabobko/tap/aerospace"
           "scroll-reverser"
           "zoom"
-          "cursor"
+          "visual-studio-code"
           "parsec"
+          # Remote access to this Mac from outside the home network: the tailnet
+          # carries native Screen Sharing, so nothing is exposed publicly. The
+          # cask (the menu bar app, user-space network extension, no root brew
+          # service) rather than the tailscale formula, whose tailscaled needs
+          # `sudo brew services`. Verified live 2026-08-23 via `brew info`:
+          # tailscale-app 1.102.3, auto_updates, installs a pkg, which the
+          # morning maintenance above already leaves to interactive runs.
+          "tailscale-app"
           "ghostty"
           "altserver"
           "webcatalog"
@@ -527,7 +535,7 @@
             "/Applications/Discord.app"
             "/Applications/Google Chrome.app"
             "/Applications/Notion.app"
-            "/Applications/Cursor.app"
+            "/Applications/Visual Studio Code.app"
             "/Applications/Microsoft Excel.app"
             "/Applications/Microsoft Word.app"
             "/Applications/Microsoft PowerPoint.app"
