@@ -92,6 +92,19 @@
     # published as one JSON document into the artifacts directory it already binds
     # read only. Every write of it goes through publishBrews below.
     brewsArtifact = "/Users/helixw/.private-office/artifacts/system/brews.json";
+    # THE OTHER HALF OF THAT REPORT, and the only way a REFUSAL can reach the
+    # user's screen at all. A declare that fails leaves the queue empty and the
+    # brews list unchanged, which is exactly what a press the watcher has not
+    # reached yet looks like, so until this document existed the hub's row went
+    # quietly back to "No Run Yet" and the reason lived only in the log below and
+    # in one notification. It is written on a refusal and removed the moment this
+    # watcher has fresh work to report on, so its presence IS the report.
+    #
+    # The hub reads it through the same read-only bind as the list, and it is the
+    # hub that turns the `reason` word into a sentence (its own
+    # app/server/modules/system/routines.ts holds those words, and this file must
+    # not write prose for a surface it cannot see).
+    declareFailureArtifact = "/Users/helixw/.private-office/artifacts/system/declare-formula-failure.json";
     # This repo, addressed absolutely rather than as a working directory: a
     # launchd job starts in / and has no notion of where its own source lives.
     dotfilesDir = "/Users/helixw/Code/dotfiles";
@@ -493,7 +506,10 @@
       # this file: it needs nix, brew, git and this checkout, and the hub's
       # container has none of them. It validates the name against Homebrew, adds
       # it to the brews list above, commits, republishes the list for the hub, and
-      # stops there.
+      # stops there. What it could NOT do until 2026-08-24 is tell the hub that it
+      # said no, so a refusal now publishes a document of its own beside that list
+      # (declareFailureArtifact above) and every refusal below goes through the one
+      # `refuse` call that writes it.
       #
       # WHAT IT WILL NOT DO, in the order that matters:
       #   - it NEVER runs darwin-rebuild. Declaring is not installing, and
@@ -525,6 +541,7 @@
         HOMEBREW_ATTR="${dotfilesDir}#darwinConfigurations.${darwinHost}.config.homebrew"
         TRIGGERS="${systemTriggerDir}"
         LOG="${declareFormulaLog}"
+        FAILURE="${declareFailureArtifact}"
 
         # PATH resolves brew and jq; HOME is what git reads the user's identity
         # through and what nix finds its own configuration under, and a launchd
@@ -539,6 +556,44 @@
         log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
         notify() {
           /usr/bin/osascript -e "display notification \"$1\" with title \"Declare Formula\"" || true
+        }
+
+        # PUBLISHING A REFUSAL so the hub's own row can show it, which is the
+        # only surface the user is actually looking at when they press Run.
+        #
+        # IT WRITES A WORD AND NOT A SENTENCE. The reason is a token this file
+        # and the hub agree on, and the hub owns the wording; a script writing
+        # prose for a page it cannot see is how two spellings of one message
+        # start. The moment is LOCAL and spelled the way that hub already reads
+        # every other moment on this machine (its routine-status.ts).
+        #
+        # WRITTEN THROUGH A RENAME inside the artifacts directory, exactly as
+        # publishBrews above writes the list, so a reader on the other side of
+        # the bind mount sees the old document or the new one and never half of
+        # one. It NEVER fails the run it is reporting on: this is the report,
+        # and a report that cannot be filed must not become a second failure.
+        record_failure() {
+          mkdir -p "$(dirname "$FAILURE")" || return 0
+          rf_tmp=$(mktemp "$FAILURE.XXXXXX") || return 0
+          if jq -n \
+            --arg failed_at "$(date '+%Y-%m-%d %H:%M:%S')" \
+            --arg formula "$1" \
+            --arg reason "$2" \
+            '{failed_at: $failed_at, formula: $formula, reason: $reason}' > "$rf_tmp"; then
+            chmod 644 "$rf_tmp"
+            mv -f "$rf_tmp" "$FAILURE"
+            return 0
+          fi
+          rm -f "$rf_tmp"
+        }
+
+        # ONE REQUEST REFUSED: said in the log in this script's words and in the
+        # document in the hub's token. They are deliberately the same call, so a
+        # refusal cannot be logged and left unpublished. Called only from
+        # declare_formula, where df_typed is the request in hand.
+        refuse() {
+          log "FAILED $df_typed: $2"
+          record_failure "$df_typed" "$1"
         }
 
         # THE DRAIN, which is the contract's and is stated in full at the first
@@ -585,6 +640,19 @@
           exit 0
         fi
 
+        # THIS RUN SUPERSEDES THE LAST REPORT, so the previous refusal goes now
+        # that there is fresh work to report on. A SUCCESS therefore clears the
+        # document by leaving it cleared, which is what makes a declare that
+        # works erase the failure before it without this script having to notice
+        # that it did.
+        #
+        # IT IS CLEARED HERE AND NOT AT THE TOP, which is the whole reason this
+        # line sits below the exit above rather than above it. QueueDirectories
+        # relaunches this job once more after every drain, and that relaunch
+        # finds an empty queue: clearing before that check would wipe a refusal
+        # seconds after writing it, and the reader would never see one.
+        rm -f "$FAILURE"
+
         # THE USER'S OWN EDIT COMES FIRST. A commit here is limited to flake.nix,
         # so an unrelated file in flight is safe either way, but an unfinished
         # edit to THIS file would be committed under a message about a formula.
@@ -594,6 +662,11 @@
            ! "$GIT" -C "$DOTFILES" diff --cached --quiet -- flake.nix; then
           log "FAILED: flake.nix carries uncommitted changes, so nothing was declared"
           notify "flake.nix has uncommitted changes, so nothing was declared"
+          # Reported against the LAST formula queued, which is the one the
+          # person who is about to look at the page just typed. Every request in
+          # this run was refused for the one reason, the log lists them all, and
+          # a row can only carry one.
+          record_failure "$(tail -n 1 "$requested")" flake-dirty
           rm -f "$requested"
           exit 1
         fi
@@ -673,24 +746,24 @@
           # segments of user/repo/formula, and anything else is neither.
           case "$df_typed" in
             */*/*/*)
-              log "FAILED $df_typed: that is not a formula name"
+              refuse not-a-formula-name "that is not a formula name"
               return 1
               ;;
             */*/*)
               df_tap=$(normalise_tap "$(dirname "$df_typed")")
               if ! trusted_taps | grep -qxF "$df_tap"; then
-                log "FAILED $df_typed: this flake does not trust the tap $df_tap, so nothing was declared"
+                refuse untrusted-tap "this flake does not trust the tap $df_tap, so nothing was declared"
                 return 1
               fi
               ;;
             */*)
-              log "FAILED $df_typed: that is not a formula name"
+              refuse not-a-formula-name "that is not a formula name"
               return 1
               ;;
           esac
 
           if ! df_json=$("$BREW" info --formula "$df_typed" --json=v2 2>/dev/null); then
-            log "FAILED $df_typed: Homebrew has no formula by that name"
+            refuse no-such-formula "Homebrew has no formula by that name"
             return 1
           fi
           df_canonical=$(printf '%s' "$df_json" | jq -r '.formulae[0].name // empty')
@@ -698,7 +771,7 @@
           df_tapname=$(printf '%s' "$df_json" | jq -r '.formulae[0].tap // empty')
           df_aliases=$(printf '%s' "$df_json" | jq -r '.formulae[0].aliases[]?')
           if [ -z "$df_full" ] || [ -z "$df_tapname" ]; then
-            log "FAILED $df_typed: Homebrew answered nothing this could read"
+            refuse unreadable-brew-answer "Homebrew answered nothing this could read"
             return 1
           fi
 
@@ -719,7 +792,7 @@
               # that tap carries the flag the same way bun does.
               df_entry="{ name = \"$df_full\"; trusted = true; }"
             else
-              log "FAILED $df_typed: this flake does not trust the tap $df_tap, so nothing was declared"
+              refuse untrusted-tap "this flake does not trust the tap $df_tap, so nothing was declared"
               return 1
             fi
           fi
@@ -730,7 +803,7 @@
           # the alias, so a check on the typed word alone would declare a second
           # entry for a formula that is already there.
           if ! df_declared=$(declared_names); then
-            log "FAILED $df_typed: the declared formulae could not be read"
+            refuse unreadable-declarations "the declared formulae could not be read"
             return 1
           fi
           # Intentional word splitting: one alias per line.
@@ -743,7 +816,7 @@
           done
 
           if ! insert_brew "$df_entry"; then
-            log "FAILED $df_typed: it could not be added to the brews list"
+            refuse insert-refused "it could not be added to the brews list"
             return 1
           fi
 
@@ -753,7 +826,7 @@
           # flake.nix that does not evaluate is a machine that cannot be activated
           # at all and no one request is worth that.
           if ! declared_names | grep -qxF "$df_name"; then
-            log "FAILED $df_typed: the flake did not evaluate with it, so the edit was reverted"
+            refuse flake-would-not-evaluate "the flake did not evaluate with it, so the edit was reverted"
             "$GIT" -C "$DOTFILES" checkout -- flake.nix
             return 1
           fi
@@ -762,7 +835,7 @@
           printf 'feat(homebrew): declare %s\n' "$df_name" > "$df_message"
           if ! "$GIT" -C "$DOTFILES" commit -q -F "$df_message" -- flake.nix; then
             rm -f "$df_message"
-            log "FAILED $df_typed: the commit was refused, so the edit was reverted"
+            refuse commit-refused "the commit was refused, so the edit was reverted"
             "$GIT" -C "$DOTFILES" checkout -- flake.nix
             return 1
           fi
@@ -771,7 +844,7 @@
           # REPUBLISHED HERE rather than once at the end, so that a run declaring
           # three formulae shows each one as it lands.
           if ! ${publishBrews}; then
-            log "FAILED $df_typed: declared and committed, but the list the hub reads could not be republished"
+            refuse publish-refused "declared and committed, but the list the hub reads could not be republished"
             return 1
           fi
 
@@ -785,11 +858,13 @@
         done < "$requested"
         rm -f "$requested"
 
-        # SAID OUT LOUD, because the hub cannot say it. Its row for this routine
-        # reports what is in the queue, and the queue is empty by now either way;
-        # what it shows beyond that is the declared list itself, which is the
-        # whole report for a formula that landed and no report at all for one that
-        # did not. A notification is the only place a refusal is visible.
+        # SAID OUT LOUD AS WELL, and the "as well" is the change of 2026-08-24.
+        # The last refusal is now published where the hub reads it (record_failure
+        # above), so the page the user pressed Run on shows what happened rather
+        # than falling silently back to "No Run Yet"; the notification stays,
+        # because it is the half that reaches somebody who is no longer looking at
+        # that page, and the count it carries is the one thing the single
+        # published document cannot say.
         if [ "$failures" -gt 0 ]; then
           log "FAILED: $failures request(s) declared nothing"
           notify "$failures request(s) declared nothing; see $LOG"
