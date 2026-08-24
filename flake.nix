@@ -27,20 +27,37 @@
     maintenanceLock = "/Users/helixw/Library/Caches/dotfiles-system-maintenance.lock";
     maintenanceStamp = "/Users/helixw/Library/Caches/dotfiles-system-maintenance.last-run";
     maintenanceLog = "/Users/helixw/Library/Logs/morning-maintenance.log";
-    # The private-office hub asks for an off-schedule maintenance run by writing
-    # a trigger here; launchd watches this directory. It is created at activation
-    # because launchd can only watch a path that exists when the job is loaded.
-    # Two rules hold. ACROSS routines, a second one wanting a trigger gets its
-    # OWN watched directory rather than sharing this one. WITHIN this directory
-    # the contract is ONE EXACT FILENAME, maintenance.json: the hub writes
-    # <uuid>.writing and renames it onto that name, so the final name is the only
-    # one that ever denotes a complete document and the watcher reads nothing
-    # else.
+    # THE TRIGGER QUEUES the private-office hub asks for off-schedule runs
+    # through. Each is created at activation because launchd can only watch a
+    # path that exists when the job loads, and each belongs to exactly ONE
+    # routine: a second routine wanting a queue gets its own directory rather
+    # than sharing one, since two watchers on one directory drain each other's
+    # requests.
+    #
+    # THE CONTRACT, which the hub states in full at its own end
+    # (~/Code/private-office/app/server/config.ts, the host-run trigger queues)
+    # and which both repos must hold to the letter:
+    #   - the hub adds ONE FILE PER PRESS, named run-<uuid>.json, and never
+    #     removes it. The NAME is the whole request: an entry appears under its
+    #     final name already, so seeing it is enough and the body, one JSON
+    #     object of {requested_at} plus an optional {argument}, is read
+    #     tolerantly for the log alone;
+    #   - a watcher registers with QueueDirectories and NEVER WatchPaths, and
+    #     DRAINS ITS QUEUE COMPLETELY before doing any work. Both halves are
+    #     load-bearing and both are measured, at the agents below;
+    #   - whether N drained requests are ONE run or N is the watcher's own call.
+    #     Maintenance collapses them, brew being no better for running twice.
+    #
+    # UNTIL 2026-08-24 each queue was ONE EXACT FILENAME the hub renamed onto,
+    # which meant a second press before the first was consumed OVERWROTE it. That
+    # is what broke for the user: two presses 1.46 seconds apart, the first run
+    # and the second left on disk unconsumed for ten hours, because WatchPaths is
+    # "highly race-prone, and it is entirely possible for modifications to be
+    # missed" (launchd.plist(5)) and does not replay a write that lands while the
+    # job it woke is still running.
     maintenanceTriggerDir = "/Users/helixw/.private-office/triggers";
-    # The SECOND watched directory the rule above promised, for the hub's
-    # Shopping Research routine, and its own log and lock. Same contract, one
-    # exact filename: the hub writes shopping-research.json into this directory
-    # and nothing else here is ever read.
+    # The SECOND queue the rule above promised, for the hub's Shopping Research
+    # routine, and its own log and lock. Same contract exactly.
     #
     # WHY IT RUNS HERE AT ALL: the routine spawns the `claude` CLI on the user's
     # own subscription, and that binary and its credentials live on this Mac and
@@ -50,7 +67,7 @@
     shoppingLog = "/Users/helixw/Library/Logs/shopping-research.log";
 
     configuration = { pkgs, config, ... }: let
-      # Unattended morning maintenance. Runs as the login user: no root, no
+      # Unattended Software Update run. Runs as the login user: no root, no
       # secrets, and macOS updates are listed only, never installed. Casks whose
       # artifacts carry a pkg stanza run an installer that asks for sudo, which
       # there is no tty to answer, so the outdated list is filtered against
@@ -71,37 +88,46 @@
         log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
         # Two ways in, one script. A SCHEDULED run (08:00, or the catch-up at
-        # load) dedupes on the date stamp below and is unchanged. A TRIGGERED
-        # run, which the private-office hub asks for by writing a JSON object of
-        # {requested_at, force} to $TRIGGERS/maintenance.json, bypasses that
-        # stamp when force is true, for that run alone. The trigger is consumed
-        # before any work, so a run that dies midway cannot re-fire forever.
-        # Consuming it modifies the watched directory and so queues one more
-        # launch: that launch finds no trigger and today's stamp and exits at the
-        # check below, which is why a forced run still writes the stamp.
+        # load) dedupes on the date stamp below and is unchanged. A REQUESTED
+        # run, which the private-office hub asks for by adding run-<uuid>.json to
+        # $TRIGGERS, bypasses that stamp for that run alone. The queue is drained
+        # BEFORE any work, so a run that dies midway cannot re-fire forever.
+        #
+        # EVERY ENTRY IS DELETED, recognised or not, and that is mandatory rather
+        # than tidiness. QueueDirectories keeps this job alive for as long as the
+        # directory is not empty, so one file left behind relaunches it every 10
+        # seconds forever (measured 2026-08-24; 10 seconds is launchd's default
+        # ThrottleInterval). The old rule here was the opposite, to report an
+        # unexpected file and leave it in place, which under this mechanism would
+        # be a respawn loop. Deleting is in scope because this directory is the
+        # contract's own and holds nothing else by construction.
+        #
+        # WHAT IS DELETED IS EXACTLY WHAT WAS LISTED, which is why the listing
+        # goes to a file first rather than being re-globbed at the rm. A press
+        # landing between the two would otherwise be deleted without ever being
+        # run, which is the very class of loss this whole mechanism replaced;
+        # this way it survives, leaves the queue non-empty, and earns its own
+        # relaunch the moment this run exits.
         force=0
-        trigger="$TRIGGERS/maintenance.json"
-        if [ -f "$trigger" ]; then
-          requested_at=$(jq -r '.requested_at // "unknown"' < "$trigger" 2>/dev/null || echo unknown)
-          if [ "$(jq -r '.force // false' < "$trigger" 2>/dev/null)" = "true" ]; then
-            force=1
-          fi
-          rm -f "$trigger"
-          log "trigger consumed (requested_at $requested_at, force $force)"
-        fi
-
-        # ONLY that exact name is ever read or deleted. The hub writes
-        # <uuid>.writing and renames it onto maintenance.json, so the rename is
-        # what publishes a complete document; taking any file the directory
-        # happens to hold would let this job read and unlink a temp mid-write and
-        # destroy the atomicity that rename exists to buy. A leftover temp means
-        # a hub write died partway, which is reported and left alone: it is the
-        # hub's to clean up, not this job's.
-        if [ -d "$TRIGGERS" ]; then
-          residue=$(find "$TRIGGERS" -maxdepth 1 -type f ! -name maintenance.json -print 2>/dev/null | head -n 5)
-          if [ -n "$residue" ]; then
-            log "unexpected residue in $TRIGGERS, left in place: $(printf '%s' "$residue" | tr '\n' ' ')"
-          fi
+        drained=$(mktemp -t private-office-maintenance-drain)
+        find "$TRIGGERS" -mindepth 1 -maxdepth 1 > "$drained" 2>/dev/null || true
+        requests=$(grep -c '/run-[^/]*\.json$' "$drained" || true)
+        while IFS= read -r entry; do
+          case "$entry" in
+            */run-*.json)
+              requested_at=$(jq -r '.requested_at // "unknown"' < "$entry" 2>/dev/null || echo unknown)
+              log "request drained ($(basename "$entry"), requested_at $requested_at)"
+              ;;
+            *)
+              log "unrecognised entry drained from $TRIGGERS: $(basename "$entry")"
+              ;;
+          esac
+          rm -rf -- "$entry"
+        done < "$drained"
+        rm -f "$drained"
+        if [ "$requests" -gt 0 ]; then
+          force=1
+          log "$requests request(s) drained; running now and skipping the day stamp"
         fi
 
         # The agent also runs at load, so a Mac that was asleep at 08:00 catches
@@ -272,7 +298,7 @@
               failed="''${failed:+$failed, }brew-linkage-unrepaired"
             else
               log "repaired: $(printf '%s' "$broken" | tr '\n' ' ')"
-              /usr/bin/osascript -e "display notification \"Repaired: $(printf '%s' "$broken" | tr '\n' ' ')\" with title \"Morning Maintenance\"" || true
+              /usr/bin/osascript -e "display notification \"Repaired: $(printf '%s' "$broken" | tr '\n' ' ')\" with title \"Software Update\"" || true
             fi
           fi
         fi
@@ -286,7 +312,7 @@
 
         if [ -n "$failed" ]; then
           log "FAILED: $failed"
-          /usr/bin/osascript -e "display notification \"Failed: $failed\" with title \"Morning Maintenance\"" || true
+          /usr/bin/osascript -e "display notification \"Failed: $failed\" with title \"Software Update\"" || true
           exit 1
         fi
 
@@ -309,7 +335,6 @@
         APP=/Users/helixw/Code/private-office/app
         TRIGGERS="${shoppingTriggerDir}"
         LOG="${shoppingLog}"
-        trigger="$TRIGGERS/shopping-research.json"
 
         # PATH resolves bun and claude; HOME and USER are exported rather than
         # inherited because the routine passes exactly these three on to the
@@ -323,46 +348,51 @@
         log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
         # NO SCHEDULE AND NO CATCH-UP, which is the one place this differs from
-        # morning maintenance above: every run here was asked for by a person a
-        # moment ago, so there is no dedupe stamp to keep and nothing to catch up
-        # on. The job fires on a change to the watched directory alone, and a
-        # trigger written while this agent was not loaded is simply picked up at
-        # the next press, which rewrites the same filename and is itself the
-        # change that fires this.
-        if [ ! -f "$trigger" ]; then
-          log "no trigger present; nothing to do"
+        # the Software Update agent above: every run here was asked for by a
+        # person a moment ago, so there is no dedupe stamp to keep and nothing to
+        # catch up on. The job launches on its queue being non-empty alone, and a
+        # request added while this agent was not loaded is picked up the moment it
+        # loads, the queue still holding it.
+        #
+        # THE DRAIN IS THE SAME ONE THE AGENT ABOVE DOES and its reasoning is
+        # stated there in full: every entry goes, recognised or not, because
+        # QueueDirectories relaunches this job every 10 seconds for as long as
+        # anything is left; and exactly what was LISTED is what is deleted, so a
+        # press landing mid-drain survives to earn its own relaunch instead of
+        # being swept away unrun.
+        #
+        # N REQUESTS ARE ONE SWEEP. A sweep works from the Inbox as it stands
+        # when it starts, so two presses seconds apart describe the same work and
+        # running it twice would spend the user's subscription twice over the same
+        # rows. What each drained request buys is the guarantee that a sweep
+        # happens AFTER it, which the relaunch gives.
+        drained=$(mktemp -t private-office-shopping-drain)
+        find "$TRIGGERS" -mindepth 1 -maxdepth 1 > "$drained" 2>/dev/null || true
+        requests=$(grep -c '/run-[^/]*\.json$' "$drained" || true)
+        while IFS= read -r entry; do
+          case "$entry" in
+            */run-*.json)
+              requested_at=$(jq -r '.requested_at // "unknown"' < "$entry" 2>/dev/null || echo unknown)
+              log "request drained ($(basename "$entry"), requested_at $requested_at)"
+              ;;
+            *)
+              log "unrecognised entry drained from $TRIGGERS: $(basename "$entry")"
+              ;;
+          esac
+          rm -rf -- "$entry"
+        done < "$drained"
+        rm -f "$drained"
+
+        # A launch with nothing to run is ordinary rather than exceptional: it is
+        # what the relaunch after a drain always finds, and what an unrecognised
+        # file alone would produce. Nothing here has a schedule, so no request
+        # means no work.
+        if [ "$requests" -eq 0 ]; then
+          log "no request in the queue; nothing to do"
           exit 0
         fi
 
-        requested_at=$(jq -r '.requested_at // "unknown"' < "$trigger" 2>/dev/null || echo unknown)
-        force=$(jq -r '.force // false' < "$trigger" 2>/dev/null || echo false)
-        # Consumed BEFORE any work, so a run that dies midway cannot re-fire
-        # forever. Consuming it modifies the watched directory and so queues one
-        # more launch, which finds no trigger and exits at the check above.
-        rm -f "$trigger"
-
-        # ONLY that exact name is ever read or deleted. The hub writes
-        # <uuid>.writing and renames it onto shopping-research.json, so the
-        # rename is what publishes a complete document; taking any file the
-        # directory happens to hold would let this job read and unlink a temp
-        # mid-write and destroy the atomicity the rename exists to buy. A
-        # leftover temp means a hub write died partway: it is reported and left
-        # alone, being the hub's to clean up, which it does at its next write.
-        residue=$(find "$TRIGGERS" -maxdepth 1 -type f ! -name shopping-research.json -print 2>/dev/null | head -n 5)
-        if [ -n "$residue" ]; then
-          log "unexpected residue in $TRIGGERS, left in place: $(printf '%s' "$residue" | tr '\n' ' ')"
-        fi
-
-        # force is what makes a document a REQUEST rather than a file that
-        # happens to be there, so a payload without it is consumed and not acted
-        # on. It is the same flag maintenance honours, doing the job its own
-        # design gives it here: this routine has no dedupe for it to bypass.
-        if [ "$force" != "true" ]; then
-          log "trigger consumed (requested_at $requested_at) with force unset; not running"
-          exit 0
-        fi
-
-        log "trigger consumed (requested_at $requested_at); running Shopping Research"
+        log "$requests request(s) drained; running Shopping Research"
         if "$BUN" run --cwd "$APP" office run shopping-enrichment; then
           log "done"
         else
@@ -576,7 +606,7 @@
         reattach = true;
       };
 
-      # Unattended morning maintenance, daily at 08:00. lockf(1) holds a kernel
+      # Unattended Software Update run, daily at 08:00. lockf(1) holds a kernel
       # flock for the whole run, so the interactive `dr` (which takes the same
       # file) cannot run brew at the same time; -t 0 means a collision skips this
       # run rather than queueing it, and the lock cannot go stale because the
@@ -586,18 +616,39 @@
         # as `/bin/sh -c "/bin/wait4path /nix/store && exec <command>"`, so a
         # fire at login cannot start before the Nix store is mounted and find
         # the script path missing.
-        command = "/usr/bin/lockf -t 0 -k ${maintenanceLock} /usr/bin/caffeinate -i ${morningMaintenance}";
+        # -s silences lockf's own "already locked" line. It matters now that the
+        # queue relaunches this job every 10 seconds through a collision (see
+        # QueueDirectories below): without it, a 20 minute `dr` would write a
+        # hundred error lines into the run log for a condition that is not an
+        # error and resolves itself.
+        command = "/usr/bin/lockf -s -t 0 -k ${maintenanceLock} /usr/bin/caffeinate -i ${morningMaintenance}";
         serviceConfig = {
           # Nothing here was asked for by the user at the keyboard, so launchd
           # throttles its CPU and I/O rather than letting it disturb the session.
           ProcessType = "Background";
           StartCalendarInterval = [ { Hour = 8; Minute = 0; } ];
-          # The hub's on-demand path. Dropping a trigger file into this
-          # directory starts the same job the schedule starts; which of the two
-          # fired is read from the trigger file itself, so there is one script
-          # and one lock rather than a second agent shadowing this one. lockf
-          # already serializes a trigger that lands mid-run.
-          WatchPaths = [ maintenanceTriggerDir ];
+          # The hub's on-demand path. A request added to this queue starts the
+          # same job the schedule starts; which of the two fired is read from the
+          # queue itself, so there is one script and one lock rather than a second
+          # agent shadowing this one.
+          #
+          # QueueDirectories AND NEVER WatchPaths, which is the fix of 2026-08-24
+          # and is not a preference. WatchPaths is edge-triggered on a filesystem
+          # event and is documented as lossy; QueueDirectories "keeps the job
+          # alive as long as the directory or directories specified are not
+          # empty" (launchd.plist(5)), so it is a CONDITION rather than an event
+          # and a request that lands mid-run relaunches this job once the run
+          # exits. Both were measured live against the double press the user
+          # actually made, 1.46 seconds apart: under WatchPaths the second
+          # request was still on disk 45 seconds after the job had finished and
+          # was never re-fired; under QueueDirectories it ran 2 seconds later.
+          #
+          # THE PRICE, stated because it is real: a lockf collision means the
+          # script never runs and never drains, so this job relaunches every 10
+          # seconds until `dr` lets the lock go. That is why lockf takes -s
+          # above. It is the right direction, a silent retry that eventually
+          # honours the press, where the old mechanism silently dropped it.
+          QueueDirectories = [ maintenanceTriggerDir ];
           StandardOutPath = maintenanceLog;
           StandardErrorPath = maintenanceLog;
           # Catches up a missed 08:00 at the next login. The script's own date
@@ -618,14 +669,18 @@
         # `office run shopping-enrichment` in a terminal, which takes no lock; a
         # sweep only ever writes items whose name is still null, so the cost of
         # that overlap is duplicated work on the user's own subscription rather
-        # than a damaged store. -t 0 means a collision skips this launch, leaving
-        # the trigger unconsumed for the next press to re-fire.
-        command = "/usr/bin/lockf -t 0 -k ${shoppingLock} /usr/bin/caffeinate -i ${shoppingResearch}";
+        # than a damaged store. -t 0 means a collision skips this launch, and -s
+        # silences it: the queue below is what re-fires the job, every 10 seconds
+        # until the lock frees, so the request is honoured rather than left
+        # behind and the log stays free of a hundred lines saying so.
+        command = "/usr/bin/lockf -s -t 0 -k ${shoppingLock} /usr/bin/caffeinate -i ${shoppingResearch}";
         serviceConfig = {
           ProcessType = "Background";
-          # The whole trigger: a change in this directory starts the job, which
-          # reads the one filename it consumes and exits when there is none.
-          WatchPaths = [ shoppingTriggerDir ];
+          # The whole trigger: this job runs for as long as its queue is not
+          # empty, draining every request it finds and exiting when there are
+          # none. QueueDirectories and never WatchPaths, for the reason the agent
+          # above states in full and with the same live measurement behind it.
+          QueueDirectories = [ shoppingTriggerDir ];
           StandardOutPath = shoppingLog;
           StandardErrorPath = shoppingLog;
         };
@@ -1218,7 +1273,7 @@
                   alias claude="caffeinate -dims claude"
 
                   # Rebuild the system, holding the same lock the scheduled
-                  # morning-maintenance agent takes, so the two never run brew
+                  # Software Update agent takes, so the two never run brew
                   # against each other.
                   dr() {
                     local rc
@@ -1229,7 +1284,7 @@
                     rc=$?
                     # 75 is EX_TEMPFAIL: lockf could not take the lock.
                     if [ $rc -eq 75 ]; then
-                      echo "dr: morning maintenance is running; try again shortly." >&2
+                      echo "dr: a software update is running; try again shortly." >&2
                     fi
                     return $rc
                   }
