@@ -37,16 +37,23 @@
     # THE CONTRACT, which the hub states in full at its own end
     # (~/Code/private-office/app/server/config.ts, the host-run trigger queues)
     # and which both repos must hold to the letter:
-    #   - the hub adds ONE FILE PER PRESS, named run-<uuid>.json, and never
-    #     removes it. The NAME is the whole request: an entry appears under its
-    #     final name already, so seeing it is enough and the body, one JSON
-    #     object of {requested_at} plus an optional {argument}, is read
-    #     tolerantly for the log alone;
+    #   - the hub adds ONE FILE PER PRESS, named
+    #     run-<arrival instant>-<uuid>.json, and never removes it. The NAME is
+    #     the whole request: an entry appears under its final name already, so
+    #     seeing it is enough and the body, one JSON object of {requested_at}
+    #     plus an optional {argument}, is read tolerantly for the log alone. The
+    #     instant is ISO 8601 with : and . written as -, so it is fixed-width
+    #     and big-endian and a plain `sort` on the names IS arrival order;
     #   - a watcher registers with QueueDirectories and NEVER WatchPaths, and
     #     DRAINS ITS QUEUE COMPLETELY before doing any work. Both halves are
     #     load-bearing and both are measured, at the agents below;
-    #   - whether N drained requests are ONE run or N is the watcher's own call.
-    #     Maintenance collapses them, brew being no better for running twice.
+    #   - whether N drained requests are ONE run or N is the watcher's own call,
+    #     and the ARGUMENT decides it. A routine taking none COLLAPSES them,
+    #     brew being no better for running twice, which is what both agents
+    #     below do. A routine whose request CARRIES a value acts on EVERY
+    #     drained request IN ARRIVAL ORDER, two presses being two different
+    #     formulae; that watcher sorts its listing, and the name is spelled to
+    #     make a plain sort enough.
     #
     # UNTIL 2026-08-24 each queue was ONE EXACT FILENAME the hub renamed onto,
     # which meant a second press before the first was consumed OVERWROTE it. That
