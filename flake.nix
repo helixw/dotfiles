@@ -207,10 +207,6 @@
           failed="''${failed:+$failed, }brew-update"
         fi
 
-        # Captured before the upgrade, so the verification phase below knows
-        # which formulae moved and therefore whose dependents can be orphaned.
-        outdated_formulae=$("$BREW" outdated --formula --quiet || true)
-
         # --yes because ask mode is brew's default and would hang unattended.
         log "brew upgrade (formulae)"
         "$BREW" upgrade --formula --yes || failed="''${failed:+$failed, }brew-upgrade-formula"
@@ -256,7 +252,7 @@
           fi
         fi
 
-        # Post-upgrade linkage verification, repaired in the same run.
+        # Linkage verification, repaired in the same run.
         #
         # WORKED CASE, 2026-08-18: simdutf moved to 9.1.0, which ships
         # libsimdutf.35 only, while the installed merve 1.2.2_1 still linked
@@ -315,25 +311,30 @@
           done | sort -u
         }
 
-        log "verifying linkage of upgraded formulae and their dependents"
-        if [ -z "$outdated_formulae" ]; then
-          log "no formulae were upgraded; nothing to verify"
+        # EVERY RUN, AND NEVER ONLY A RUN THAT UPGRADED SOMETHING. Scoping this
+        # to the formulae that just moved made a quiet day look like a clean
+        # machine: a break survives every later run until something upgrades
+        # again, and it is a run that upgrades nothing that a person is least
+        # likely to go and read. The candidate set is therefore every installed
+        # formula, which subsumes the upgraded ones and their dependents. It
+        # reads Mach-O headers and executes nothing, so the cost is time alone:
+        # 72 seconds over 92 formulae, measured 2026-08-24 on this machine.
+        log "verifying linkage across every installed formula"
+        if ! installed_formulae=$("$BREW" list --formula); then
+          # An unreadable list and a machine with nothing installed reach this
+          # scan looking identical, so a failed read is reported rather than
+          # passing as a verification that found nothing wrong.
+          log "the installed formulae could not be listed; linkage was not verified"
+          failed="''${failed:+$failed, }brew-linkage-unverified"
+        elif [ -z "$installed_formulae" ]; then
+          log "no installed formulae to verify"
         else
-          # `brew uses` intersects when given several formulae at once, so the
-          # dependents are resolved one upgraded formula at a time.
-          candidates=$(
-            printf '%s\n' "$outdated_formulae"
-            for uf in $outdated_formulae; do
-              "$BREW" uses --installed --recursive --formula "$uf" 2>/dev/null
-            done
-          )
-          candidates=$(printf '%s\n' "$candidates" | sort -u)
           # Intentional word splitting: one formula token per line.
           # shellcheck disable=SC2086
-          broken=$(broken_formulae $candidates)
+          broken=$(broken_formulae $installed_formulae)
 
           if [ -z "$broken" ]; then
-            log "linkage clean across $(printf '%s\n' "$candidates" | wc -l | tr -d ' ') formulae"
+            log "linkage clean across $(printf '%s\n' "$installed_formulae" | wc -l | tr -d ' ') formulae"
           else
             log "orphaned linkage: $(printf '%s' "$broken" | tr '\n' ' ')"
             # Only the orphaned formula is touched. Repouring it relinks it
@@ -476,19 +477,36 @@
         fi
       '';
 
-      # PUBLISHING WHAT THIS FLAKE DECLARES, so the hub can show it. It is one
-      # command, kept in one place because two callers run it: the Declare Formula
-      # watcher below republishes after every formula it adds, a list still
-      # missing what the user just asked for reading exactly like a press that did
-      # nothing; and the Software Update run republishes daily, so a formula added
-      # by hand in an editor reaches the page as well.
+      # PUBLISHING WHAT THIS FLAKE DECLARES, formulae AND casks, so the hub can
+      # show it. Two callers run it: the Declare Formula watcher below
+      # republishes after every formula it adds, a list still missing what the
+      # user just asked for reading exactly like a press that did nothing; and
+      # the Software Update run republishes daily, so an item added by hand in an
+      # editor reaches the page as well.
+      #
+      # THE DOCUMENT: { formulae: [...], casks: [...] }. A formula entry is what
+      # nix evaluated plus a description; a cask entry is a name and a
+      # description. The hub reads exactly this shape.
       #
       # NIX EVAL RATHER THAN A PARSE OF THIS FILE, which is forced rather than
       # preferred: the evaluated value is what darwin-rebuild would actually
-      # apply, and it resolves BOTH declaration forms this file uses, the bare
+      # apply, and it resolves EVERY declaration form this file uses, the bare
       # string and the { name = ...; trusted = ...; } attribute set, into one
       # shape carrying one fully qualified name. A regex over the source would
-      # have to reinvent that and would break the day this block changes shape.
+      # have to reinvent that and would break the day either list changes shape.
+      #
+      # DESCRIPTIONS ARE KEYED THE WAY EACH KIND IS ADDRESSED, which is not the
+      # same key twice. A formula answers to its full_name AND to every alias,
+      # because this list declares `python` for a formula whose full_name is
+      # python@3.14; a cask answers to its full_token, which is what carries the
+      # tap for the two declared from one. Both reads are offline: auto-update is
+      # suppressed, so nothing here reaches the network.
+      #
+      # A METADATA READ THAT FAILS LEAVES DESCRIPTIONS EMPTY rather than failing
+      # the publish. The list is the part the hub cannot do without, and one
+      # unknown name makes brew answer nothing at all for the whole batch
+      # (verified 2026-08-24: exit 1, zero bytes of stdout), so the alternative
+      # is losing the list over a description.
       #
       # WRITTEN THROUGH A RENAME inside the artifacts directory itself, so a
       # reader on the other side of the bind mount sees the previous document or
@@ -497,11 +515,61 @@
         set -u
 
         NIX=/nix/var/nix/profiles/default/bin/nix
+        BREW=/opt/homebrew/bin/brew
         OUT="${brewsArtifact}"
+        HOMEBREW_ATTR="${dotfilesDir}#darwinConfigurations.${darwinHost}.config.homebrew"
+
+        export HOMEBREW_NO_AUTO_UPDATE=1
+        export HOMEBREW_NO_ANALYTICS=1
+        export HOMEBREW_NO_ENV_HINTS=1
 
         mkdir -p "$(dirname "$OUT")" || exit 1
+        pb_work=$(mktemp -d -t publish-brews) || exit 1
+        trap 'rm -rf "$pb_work"' EXIT
+
+        "$NIX" eval "$HOMEBREW_ATTR.brews" --json > "$pb_work/formulae.json" || exit 1
+        "$NIX" eval "$HOMEBREW_ATTR.casks" --json > "$pb_work/casks.json" || exit 1
+
+        # An empty map is what every failure path below leaves in place, and the
+        # assembly reads a name missing from it as a missing description.
+        printf '{}' > "$pb_work/formula-desc.json"
+        printf '{}' > "$pb_work/cask-desc.json"
+
+        pb_names=$(jq -r '.[].name' < "$pb_work/formulae.json")
+        if [ -n "$pb_names" ]; then
+          # Intentional word splitting: one formula name per line.
+          # shellcheck disable=SC2086
+          if pb_json=$("$BREW" info --formula --json=v2 $pb_names 2>/dev/null); then
+            printf '%s' "$pb_json" |
+              jq '[.formulae[] | . as $f | [$f.full_name] + ($f.aliases // []) |
+                   .[] | {key: ., value: ($f.desc // "")}] | from_entries' \
+              > "$pb_work/formula-desc.json" ||
+              printf '{}' > "$pb_work/formula-desc.json"
+          fi
+        fi
+
+        pb_tokens=$(jq -r '.[].name' < "$pb_work/casks.json")
+        if [ -n "$pb_tokens" ]; then
+          # Intentional word splitting: one cask token per line.
+          # shellcheck disable=SC2086
+          if pb_json=$("$BREW" info --cask --json=v2 $pb_tokens 2>/dev/null); then
+            printf '%s' "$pb_json" |
+              jq '[.casks[] | {key: .full_token, value: (.desc // "")}] | from_entries' \
+              > "$pb_work/cask-desc.json" ||
+              printf '{}' > "$pb_work/cask-desc.json"
+          fi
+        fi
+
         pb_tmp=$(mktemp "$OUT.XXXXXX") || exit 1
-        if "$NIX" eval "${dotfilesDir}#darwinConfigurations.${darwinHost}.config.homebrew.brews" --json > "$pb_tmp"; then
+        if jq -n \
+          --slurpfile formulae "$pb_work/formulae.json" \
+          --slurpfile casks "$pb_work/casks.json" \
+          --slurpfile formula_desc "$pb_work/formula-desc.json" \
+          --slurpfile cask_desc "$pb_work/cask-desc.json" \
+          '{
+             formulae: [$formulae[0][] | . + {description: ($formula_desc[0][.name] // "")}],
+             casks: [$casks[0][] | {name, description: ($cask_desc[0][.name] // "")}]
+           }' > "$pb_tmp"; then
           # The mode mktemp gives is the one the temporary file needed, not the
           # one a published document wants; the hub reads this through a bind
           # mount and every other artifact under there is world readable.
