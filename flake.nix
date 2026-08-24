@@ -34,41 +34,23 @@
     # than sharing one, since two watchers on one directory drain each other's
     # requests.
     #
-    # THE CONTRACT, which the hub states in full at its own end
-    # (~/Code/private-office/app/server/config.ts, the host-run trigger queues)
-    # and which both repos must hold to the letter:
-    #   - the hub adds ONE FILE PER PRESS, named
-    #     run-<arrival instant>-<uuid>.json, and never removes it. The NAME is
-    #     the whole request: an entry appears under its final name already, so
-    #     seeing it is enough and the body, one JSON object of {requested_at}
-    #     plus an optional {argument}, is read tolerantly for the log alone. The
-    #     instant is ISO 8601 with : and . written as -, so it is fixed-width
-    #     and big-endian and a plain `sort` on the names IS arrival order;
-    #   - a watcher registers with QueueDirectories and NEVER WatchPaths, and
-    #     DRAINS ITS QUEUE COMPLETELY before doing any work. Both halves are
-    #     load-bearing and both are measured, at the agents below;
-    #   - whether N drained requests are ONE run or N is the watcher's own call,
-    #     and the ARGUMENT decides it. A routine taking none COLLAPSES them,
-    #     brew being no better for running twice, which is what both agents
-    #     below do. A routine whose request CARRIES a value acts on EVERY
-    #     drained request IN ARRIVAL ORDER, two presses being two different
-    #     formulae; that watcher sorts its listing, and the name is spelled to
-    #     make a plain sort enough.
-    #
-    # UNTIL 2026-08-24 each queue was ONE EXACT FILENAME the hub renamed onto,
-    # which meant a second press before the first was consumed OVERWROTE it. That
-    # is what broke for the user: two presses 1.46 seconds apart, the first run
-    # and the second left on disk unconsumed for ten hours, because WatchPaths is
-    # "highly race-prone, and it is entirely possible for modifications to be
-    # missed" (launchd.plist(5)) and does not replay a write that lands while the
-    # job it woke is still running.
+    # THE CONTRACT, stated in full at the hub's end
+    # (~/Code/private-office/app/server/config.ts) and binding on both repos:
+    #   - the hub adds ONE FILE PER PRESS, run-<arrival instant>-<uuid>.json,
+    #     and never removes it. The NAME is the whole request, an entry
+    #     appearing under its final name already, so the body is read
+    #     tolerantly for the log alone. The instant is ISO 8601 with : and .
+    #     written as -, so a plain `sort` on the names IS arrival order;
+    #   - a watcher registers with QueueDirectories and NEVER WatchPaths, which
+    #     is race-prone by its own manual page and does not replay a write
+    #     landing while the job it woke is still running, and it DRAINS ITS
+    #     QUEUE COMPLETELY before doing any work;
+    #   - whether N drained requests are ONE run or N is the watcher's call,
+    #     and the ARGUMENT decides it: a routine taking none collapses them, a
+    #     routine whose request carries a value acts on every one in order.
     maintenanceTriggerDir = "/Users/helixw/.private-office/triggers";
     # The SECOND queue the rule above promised, for the hub's Shopping Research
     # routine, and its own log and lock. Same contract exactly.
-    #
-    # WHY IT RUNS HERE AT ALL: the routine spawns the `claude` CLI on the user's
-    # own subscription, and that binary and its credentials live on this Mac and
-    # not in the hub's image, so the container can only ask.
     shoppingTriggerDir = "/Users/helixw/.private-office/triggers-shopping";
     shoppingLock = "/Users/helixw/Library/Caches/private-office-shopping-research.lock";
     shoppingLog = "/Users/helixw/Library/Logs/shopping-research.log";
@@ -80,17 +62,12 @@
     # IN ARRIVAL ORDER by sorting the listing, which the hub spells its filenames
     # to make sufficient.
     #
-    # ONE QUEUE PER OPERATION rather than one queue carrying a verb in the body,
-    # which is the hub's own reasoning at its end (app/server/config.ts, the
-    # System triggers): a watcher must know what it is being asked to do from the
-    # entry it can see the instant it appears, and a body-borne verb is the one
-    # part of the document it cannot trust then.
-    #
-    # WHY THEY RUN HERE AT ALL: the work is an edit to this very file, and it
-    # needs `nix`, `brew`, `git` and this checkout, none of which exist in the
-    # hub's container. None of them EVER activates. Declaring puts a name in a
-    # list and undeclaring takes it out; installing and uninstalling are
-    # `darwin-rebuild`, which stays the user's own hand.
+    # ONE QUEUE PER OPERATION rather than one queue carrying a verb in the body:
+    # a watcher must know what it is being asked to do from the entry it can see
+    # the instant it appears, and a body-borne verb is the one part of the
+    # document it cannot trust then. None of these EVER activates: declaring
+    # puts a name in a list and undeclaring takes it out, while installing and
+    # uninstalling are `darwin-rebuild`, which stays the user's own hand.
     systemTriggerDir = "/Users/helixw/.private-office/triggers-system";
     systemCaskTriggerDir = "/Users/helixw/.private-office/triggers-system-cask";
     systemRemovalTriggerDir = "/Users/helixw/.private-office/triggers-system-removal";
@@ -114,15 +91,10 @@
     # notification. Each is written on a refusal and removed the moment its own
     # watcher has fresh work to report on, so its presence IS the report.
     #
-    # ONE PER QUEUE, which is what keeps the four reports independent: a shared
-    # document would let a formula refusal overwrite a cask refusal a second
-    # later, and the row that lost its report is the one nobody would think to
-    # look for.
-    #
-    # The hub reads them through the same read-only bind as the list, and it is
-    # the hub that turns the `reason` word into a sentence (its own
-    # app/server/modules/system/routines.ts holds those words, and this file must
-    # not write prose for a surface it cannot see).
+    # ONE PER QUEUE, so a formula refusal cannot overwrite a cask refusal a
+    # second later and leave the row nobody would think to look for. The hub
+    # turns the `reason` word into a sentence, so this file writes reason tokens
+    # from that vocabulary and never prose for a surface it cannot see.
     declareFormulaFailureArtifact = "/Users/helixw/.private-office/artifacts/system/declare-formula-failure.json";
     declareCaskFailureArtifact = "/Users/helixw/.private-office/artifacts/system/declare-cask-failure.json";
     removeFormulaFailureArtifact = "/Users/helixw/.private-office/artifacts/system/remove-formula-failure.json";
@@ -161,21 +133,12 @@
         # $TRIGGERS, bypasses that stamp for that run alone. The queue is drained
         # BEFORE any work, so a run that dies midway cannot re-fire forever.
         #
-        # EVERY ENTRY IS DELETED, recognised or not, and that is mandatory rather
-        # than tidiness. QueueDirectories keeps this job alive for as long as the
-        # directory is not empty, so one file left behind relaunches it every 10
-        # seconds forever (measured 2026-08-24; 10 seconds is launchd's default
-        # ThrottleInterval). The old rule here was the opposite, to report an
-        # unexpected file and leave it in place, which under this mechanism would
-        # be a respawn loop. Deleting is in scope because this directory is the
-        # contract's own and holds nothing else by construction.
-        #
-        # WHAT IS DELETED IS EXACTLY WHAT WAS LISTED, which is why the listing
-        # goes to a file first rather than being re-globbed at the rm. A press
-        # landing between the two would otherwise be deleted without ever being
-        # run, which is the very class of loss this whole mechanism replaced;
-        # this way it survives, leaves the queue non-empty, and earns its own
-        # relaunch the moment this run exits.
+        # EVERY ENTRY IS DELETED, recognised or not: QueueDirectories keeps this
+        # job alive while the directory is non-empty, so one file left behind
+        # relaunches it every ThrottleInterval forever. What is deleted is
+        # exactly what was LISTED, which is why the listing goes to a file
+        # first: a press landing between the list and the rm would otherwise be
+        # deleted without ever being run.
         force=0
         drained=$(mktemp -t private-office-maintenance-drain)
         find "$TRIGGERS" -mindepth 1 -maxdepth 1 > "$drained" 2>/dev/null || true
@@ -274,47 +237,19 @@
           fi
         fi
 
-        # Linkage verification, repaired in the same run.
+        # Linkage verification, repaired in the same run. It reads Mach-O load
+        # commands and executes nothing: `brew missing` does not see this class
+        # and `brew linkage` switches Homebrew's developer mode on to run.
+        # References under /usr/lib are skipped, living in the dyld shared cache
+        # with no file on disk to test, and symlinked entries are skipped
+        # because the real file is scanned under its own formula's name.
         #
-        # WORKED CASE, 2026-08-18: simdutf moved to 9.1.0, which ships
-        # libsimdutf.35 only, while the installed merve 1.2.2_1 still linked
-        # libsimdutf.34, so every Homebrew node invocation aborted on a dyld
-        # "Library not loaded" and exited 134. Nothing in the run noticed.
-        #
-        # DETECTOR, chosen on evidence rather than on the obvious candidates:
-        #   * `brew missing` does not see this class at all (verified
-        #     2026-08-18: no output, exit 0, while node was aborting).
-        #   * `brew linkage` does see it, but it is a developer command and
-        #     switches Homebrew's developer mode on in order to run. That mode
-        #     is off on this machine and deliberately kept off, and an
-        #     unattended job is the wrong thing to turn it on.
-        #   * Running each dependent with --version and reading the exit code is
-        #     neither side-effect free nor reliable: pdftotext reads --version
-        #     as an input FILENAME and does file I/O for it, and a binary that
-        #     merely rejects an unknown flag exits nonzero having loaded fine.
-        # So this reads Mach-O load commands and executes nothing: otool -L over
-        # each candidate's own binaries and libraries, flagging absolute
-        # references under the Homebrew prefix whose target no longer exists.
-        # That is the exact shape of the merve break, whose dylib names
-        # /opt/homebrew/opt/simdutf/lib/libsimdutf.NN.dylib outright, and the
-        # file carrying the dangling reference names the formula to repair.
-        # References under /usr/lib are skipped on purpose: they live in the
-        # dyld shared cache and have no file on disk to test. Symlinked entries
-        # are skipped too, since the real file sits in its OWN formula's prefix
-        # and that formula is scanned under its own name.
-        #
-        # The sed pattern requires AT LEAST ONE leading whitespace character,
-        # and that is load bearing rather than cosmetic. otool -L opens its
-        # output with the scanned file's own path at column zero, followed by a
-        # colon, and only the dependency lines below it are indented. A pattern
-        # accepting zero leading whitespace therefore reads that header as a
-        # dependency, keeps the trailing colon inside the greedy path token, and
-        # finds no such file, so every scanned formula flags itself against its
-        # own binary and no reinstall can ever clear it (2026-08-24: six
-        # formulae reported orphaned and STILL BROKEN after repair, with the
-        # machine's linkage entirely intact).
-        #
-        # Prints one formula name per line.
+        # The sed pattern requires AT LEAST ONE leading whitespace character.
+        # otool -L opens with the scanned file's own path at column zero and
+        # indents only the dependency lines below it, so a pattern accepting
+        # zero leading whitespace reads that header as a dependency, keeps the
+        # trailing colon inside the path token, and makes every scanned formula
+        # flag itself against its own binary with no reinstall able to clear it.
         broken_formulae() {
           for bf_name in "$@"; do
             bf_prefix=$("$BREW" --prefix --installed "$bf_name" 2>/dev/null) || continue
@@ -415,12 +350,6 @@
       # The private-office hub's Shopping Research routine, run HERE because the
       # hub serves from a container and the `claude` CLI it spawns, with the
       # user's subscription credentials, is on this machine.
-      #
-      # IT HOLDS NO COPY OF THE ROUTINE. The work is one call into that repo's
-      # own CLI, so the run this starts is byte for byte the run a terminal
-      # starts and there is nothing here to drift from it. What this script owns
-      # is only the trigger contract: read one exact filename, consume it, and
-      # decide whether to run.
       shoppingResearch = pkgs.writeShellScript "shopping-research" ''
         set -u
 
@@ -446,19 +375,6 @@
         # catch up on. The job launches on its queue being non-empty alone, and a
         # request added while this agent was not loaded is picked up the moment it
         # loads, the queue still holding it.
-        #
-        # THE DRAIN IS THE SAME ONE THE AGENT ABOVE DOES and its reasoning is
-        # stated there in full: every entry goes, recognised or not, because
-        # QueueDirectories relaunches this job every 10 seconds for as long as
-        # anything is left; and exactly what was LISTED is what is deleted, so a
-        # press landing mid-drain survives to earn its own relaunch instead of
-        # being swept away unrun.
-        #
-        # N REQUESTS ARE ONE SWEEP. A sweep works from the Inbox as it stands
-        # when it starts, so two presses seconds apart describe the same work and
-        # running it twice would spend the user's subscription twice over the same
-        # rows. What each drained request buys is the guarantee that a sweep
-        # happens AFTER it, which the relaunch gives.
         drained=$(mktemp -t private-office-shopping-drain)
         find "$TRIGGERS" -mindepth 1 -maxdepth 1 > "$drained" 2>/dev/null || true
         requests=$(grep -c '/run-[^/]*\.json$' "$drained" || true)
@@ -505,34 +421,6 @@
       # user just asked for reading exactly like a press that did nothing; and
       # the Software Update run republishes daily, so an item added by hand in an
       # editor reaches the page as well.
-      #
-      # THE DOCUMENT: { formulae: [...], casks: [...] }. A formula entry is what
-      # nix evaluated plus a description; a cask entry is a name and a
-      # description. The hub reads exactly this shape.
-      #
-      # NIX EVAL RATHER THAN A PARSE OF THIS FILE, which is forced rather than
-      # preferred: the evaluated value is what darwin-rebuild would actually
-      # apply, and it resolves EVERY declaration form this file uses, the bare
-      # string and the { name = ...; trusted = ...; } attribute set, into one
-      # shape carrying one fully qualified name. A regex over the source would
-      # have to reinvent that and would break the day either list changes shape.
-      #
-      # DESCRIPTIONS ARE KEYED THE WAY EACH KIND IS ADDRESSED, which is not the
-      # same key twice. A formula answers to its full_name AND to every alias,
-      # because this list declares `python` for a formula whose full_name is
-      # python@3.14; a cask answers to its full_token, which is what carries the
-      # tap for the two declared from one. Both reads are offline: auto-update is
-      # suppressed, so nothing here reaches the network.
-      #
-      # A METADATA READ THAT FAILS LEAVES DESCRIPTIONS EMPTY rather than failing
-      # the publish. The list is the part the hub cannot do without, and one
-      # unknown name makes brew answer nothing at all for the whole batch
-      # (verified 2026-08-24: exit 1, zero bytes of stdout), so the alternative
-      # is losing the list over a description.
-      #
-      # WRITTEN THROUGH A RENAME inside the artifacts directory itself, so a
-      # reader on the other side of the bind mount sees the previous document or
-      # the new one and never a half written one.
       publishBrews = pkgs.writeShellScript "publish-brews" ''
         set -u
 
@@ -608,36 +496,10 @@
       # needs nix, brew, git and this checkout, and the hub's container has none
       # of them.
       #
-      # WHAT THEY WILL NOT DO, in the order that matters:
-      #   - none of them ever runs darwin-rebuild. Declaring is not installing,
-      #     and activation is always the user's own hand;
-      #   - none of them ever TRUSTS A NEW TAP. An item whose tap this flake does
-      #     not already declare trusted is a stop: no edit, no commit, and the
-      #     reason said out loud. HOMEBREW_REQUIRE_TAP_TRUST exists to make
-      #     trusting a third party a deliberate act, and a name typed into a page
-      #     is not one;
-      #   - none of them touches a flake.nix carrying uncommitted work. Their
-      #     commit is path limited, but an edit of the user's in flight is theirs
-      #     to finish.
-      #
-      # VALIDATION IS `brew info`, WHICH READS AND CHANGES NOTHING. Exit 0 with
-      # JSON means the name resolves and exit 1 means it does not, verified live
-      # for both kinds 2026-08-24. HOMEBREW_NO_AUTO_UPDATE stops brew refreshing
-      # its API cache first, which is the only part of that read that would touch
-      # the network. `brew cat` and `brew linkage` are deliberately NOT used:
-      # both are developer commands that switch Homebrew's developer mode on,
-      # which this machine keeps off (the linkage phase above states the same
-      # finding).
-      #
       # A REMOVAL DOES NOT ASK HOMEBREW ANYTHING AT ALL. What can be undeclared
       # is what this file declares, so the declared list is the only authority a
       # removal needs, and an item Homebrew has since renamed or dropped must
       # still be removable.
-      #
-      # THE FOUR DIFFER IN SIX FACTS and nothing else, which is why they share a
-      # body: the kind of item, whether they add or remove it, the queue they
-      # drain, the document a refusal is published to, the log they write, and
-      # the name the notification carries.
       softwareWatcher =
         { operation, title, kind, action, triggerDir, failureArtifact, watcherLog }:
         let
@@ -689,23 +551,6 @@
 
             # PUBLISHING A REFUSAL so the hub's own row can show it, which is the
             # only surface the user is actually looking at when they press Run.
-            #
-            # IT WRITES A WORD AND NOT A SENTENCE. The reason is a token this
-            # file and the hub agree on, and the hub owns the wording; a script
-            # writing prose for a page it cannot see is how two spellings of one
-            # message start. The moment is LOCAL and spelled the way that hub
-            # already reads every other moment on this machine.
-            #
-            # `operation` NAMES WHICH ROUTINE WAS REFUSED. One document per queue
-            # already answers that by its path; the field is carried anyway so
-            # the document is readable without its filename.
-            #
-            # WRITTEN THROUGH A RENAME inside the artifacts directory, exactly as
-            # publishBrews above writes the list, so a reader on the other side
-            # of the bind mount sees the old document or the new one and never
-            # half of one. It NEVER fails the run it is reporting on: this is the
-            # report, and a report that cannot be filed must not become a second
-            # failure.
             record_failure() {
               mkdir -p "$(dirname "$FAILURE")" || return 0
               rf_tmp=$(mktemp "$FAILURE.XXXXXX") || return 0
@@ -765,14 +610,6 @@
             # as anything is left; and exactly what was LISTED is what is
             # deleted, so a press landing mid drain survives to earn its own
             # relaunch.
-            #
-            # WHAT IS DIFFERENT HERE IS THE ORDER AND THE READING. Each request
-            # carries the name a person typed, so the body is load bearing rather
-            # than a log line, and it is read BEFORE the entry is deleted. The
-            # listing is sorted, which is arrival order: the hub leads every name
-            # with a fixed width ISO instant precisely so that a plain sort is
-            # enough. N requests are N runs, never one, because two presses are
-            # two different names.
             drained=$(mktemp -t private-office-${operation}-drain)
             requested=$(mktemp -t private-office-${operation}-requests)
             find "$TRIGGERS" -mindepth 1 -maxdepth 1 2>/dev/null | LC_ALL=C sort > "$drained" || true
@@ -808,13 +645,6 @@
             # THIS RUN SUPERSEDES THE LAST REPORT, so the previous refusal goes
             # now that there is fresh work to report on. A SUCCESS therefore
             # clears the document by leaving it cleared.
-            #
-            # IT IS CLEARED HERE AND NOT AT THE TOP, which is the whole reason
-            # this line sits below the exit above rather than above it.
-            # QueueDirectories relaunches this job once more after every drain,
-            # and that relaunch finds an empty queue: clearing before that check
-            # would wipe a refusal seconds after writing it, and the reader would
-            # never see one.
             rm -f "$FAILURE"
 
             # THE USER'S OWN EDIT COMES FIRST. A commit here is limited to
@@ -1011,11 +841,6 @@
             # REMOVING ONE ENTRY, the counterpart to insert_entry and anchored
             # the same way: the line that opens the list, then the first line
             # inside it that declares this name.
-            #
-            # A COMMENT IS NEVER TOUCHED, and a line matches only as the WHOLE
-            # quoted entry or as the name field of the attribute set form. A
-            # looser match would take a name that merely appears inside a comment
-            # in that list, which this file's own brews block is full of.
             remove_entry() {
               re_tmp=$(mktemp -t private-office-${operation}-flake) || return 1
               if awk -v target="$1" '
@@ -1053,12 +878,6 @@
 
             # ONE REQUEST, START TO FINISH. 0 means the list no longer carries
             # the name; 1 means it still does.
-            #
-            # NO BREW LOOKUP HAPPENS HERE. What can be undeclared is what this
-            # file declares, so the name is matched against the declared list
-            # exactly as written, which is also what the hub offers the user to
-            # choose from. An item Homebrew has since renamed or dropped is still
-            # removable, which a validation pass would have taken away.
             handle_request() {
               sw_typed="$1"
 
@@ -1392,23 +1211,6 @@
           # same job the schedule starts; which of the two fired is read from the
           # queue itself, so there is one script and one lock rather than a second
           # agent shadowing this one.
-          #
-          # QueueDirectories AND NEVER WatchPaths, which is the fix of 2026-08-24
-          # and is not a preference. WatchPaths is edge-triggered on a filesystem
-          # event and is documented as lossy; QueueDirectories "keeps the job
-          # alive as long as the directory or directories specified are not
-          # empty" (launchd.plist(5)), so it is a CONDITION rather than an event
-          # and a request that lands mid-run relaunches this job once the run
-          # exits. Both were measured live against the double press the user
-          # actually made, 1.46 seconds apart: under WatchPaths the second
-          # request was still on disk 45 seconds after the job had finished and
-          # was never re-fired; under QueueDirectories it ran 2 seconds later.
-          #
-          # THE PRICE, stated because it is real: a lockf collision means the
-          # script never runs and never drains, so this job relaunches every 10
-          # seconds until `dr` lets the lock go. That is why lockf takes -s
-          # above. It is the right direction, a silent retry that eventually
-          # honours the press, where the old mechanism silently dropped it.
           QueueDirectories = [ maintenanceTriggerDir ];
           StandardOutPath = maintenanceLog;
           StandardErrorPath = maintenanceLog;
@@ -1449,22 +1251,6 @@
 
       # The hub's four System routines, the remaining consumers of the trigger
       # idiom above and, like the second, on demand only.
-      #
-      # NO LOCK AND NO caffeinate, which is where they differ from both agents
-      # above, and both omissions are reasoned rather than skipped. Each takes
-      # seconds, so there is no idle sleep to hold off. And the state they write
-      # is this repo's working tree, while the two locks above serialize
-      # Homebrew's prefix, which these only read.
-      #
-      # THEY CAN COLLIDE WITH EACH OTHER, and the collision is already handled
-      # rather than merely tolerated: launchd runs one instance of each JOB at a
-      # time, but these are four jobs over one file, so two presses on different
-      # routines can reach flake.nix at once. The loser meets the working tree
-      # check every one of them makes before touching anything, refuses with
-      # flake-dirty, and says so on the hub's own row; its request is not lost,
-      # because the press that earned it is what the person repeats. A lock would
-      # queue them instead, which is better, and it is not built here because the
-      # refusal is already honest and visible.
       launchd.user.agents.declare-formula = {
         command = "${declareFormula}";
         serviceConfig = {
