@@ -437,7 +437,7 @@
       '';
 
       # PUBLISHING WHAT THIS FLAKE DECLARES, formulae AND casks, so the hub can
-      # show it. Two callers run it: the Declare Formula watcher below
+      # show it. Two callers run it: the Add Formula watcher below
       # republishes after every formula it adds, a list still missing what the
       # user just asked for reading exactly like a press that did nothing; and
       # the Software Update run republishes daily, so an item added by hand in an
@@ -462,9 +462,9 @@
         "$NIX" eval "$HOMEBREW_ATTR.casks" --json > "$pb_work/casks.json" || exit 1
 
         # An empty map is what every failure path below leaves in place, and the
-        # assembly reads a name missing from it as a missing description.
+        # assembly reads a name missing from it as missing metadata.
         printf '{}' > "$pb_work/formula-desc.json"
-        printf '{}' > "$pb_work/cask-desc.json"
+        printf '{}' > "$pb_work/cask-meta.json"
 
         pb_names=$(jq -r '.[].name' < "$pb_work/formulae.json")
         if [ -n "$pb_names" ]; then
@@ -484,10 +484,14 @@
           # Intentional word splitting: one cask token per line.
           # shellcheck disable=SC2086
           if pb_json=$("$BREW" info --cask --json=v2 $pb_tokens 2>/dev/null); then
+            # A cask carries its human name as an array of alternatives; the
+            # first is the one brew shows.
             printf '%s' "$pb_json" |
-              jq '[.casks[] | {key: .full_token, value: (.desc // "")}] | from_entries' \
-              > "$pb_work/cask-desc.json" ||
-              printf '{}' > "$pb_work/cask-desc.json"
+              jq '[.casks[] | {key: .full_token,
+                               value: {description: (.desc // ""),
+                                       title: (.name[0] // "")}}] | from_entries' \
+              > "$pb_work/cask-meta.json" ||
+              printf '{}' > "$pb_work/cask-meta.json"
           fi
         fi
 
@@ -496,10 +500,11 @@
           --slurpfile formulae "$pb_work/formulae.json" \
           --slurpfile casks "$pb_work/casks.json" \
           --slurpfile formula_desc "$pb_work/formula-desc.json" \
-          --slurpfile cask_desc "$pb_work/cask-desc.json" \
+          --slurpfile cask_meta "$pb_work/cask-meta.json" \
           '{
              formulae: [$formulae[0][] | . + {description: ($formula_desc[0][.name] // "")}],
-             casks: [$casks[0][] | {name, description: ($cask_desc[0][.name] // "")}]
+             casks: [$casks[0][] | ($cask_meta[0][.name] // {}) as $m |
+                     {name, description: ($m.description // ""), title: ($m.title // "")}]
            }' > "$pb_tmp"; then
           # The mode mktemp gives is the one the temporary file needed, not the
           # one a published document wants; the hub reads this through a bind
@@ -967,7 +972,7 @@
 
       declareFormula = softwareWatcher {
         operation = "declare-formula";
-        title = "Declare Formula";
+        title = "Add Formula";
         kind = "formula";
         action = "declare";
         triggerDir = systemTriggerDir;
@@ -977,7 +982,7 @@
 
       declareCask = softwareWatcher {
         operation = "declare-cask";
-        title = "Declare Cask";
+        title = "Add Cask";
         kind = "cask";
         action = "declare";
         triggerDir = systemCaskTriggerDir;
@@ -987,7 +992,7 @@
 
       undeclareFormula = softwareWatcher {
         operation = "undeclare-formula";
-        title = "Undeclare Formula";
+        title = "Remove Formula";
         kind = "formula";
         action = "remove";
         triggerDir = systemRemovalTriggerDir;
@@ -997,7 +1002,7 @@
 
       undeclareCask = softwareWatcher {
         operation = "undeclare-cask";
-        title = "Undeclare Cask";
+        title = "Remove Cask";
         kind = "cask";
         action = "remove";
         triggerDir = systemCaskRemovalTriggerDir;
