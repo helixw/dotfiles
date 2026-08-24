@@ -285,6 +285,17 @@
         # are skipped too, since the real file sits in its OWN formula's prefix
         # and that formula is scanned under its own name.
         #
+        # The sed pattern requires AT LEAST ONE leading whitespace character,
+        # and that is load bearing rather than cosmetic. otool -L opens its
+        # output with the scanned file's own path at column zero, followed by a
+        # colon, and only the dependency lines below it are indented. A pattern
+        # accepting zero leading whitespace therefore reads that header as a
+        # dependency, keeps the trailing colon inside the greedy path token, and
+        # finds no such file, so every scanned formula flags itself against its
+        # own binary and no reinstall can ever clear it (2026-08-24: six
+        # formulae reported orphaned and STILL BROKEN after repair, with the
+        # machine's linkage entirely intact).
+        #
         # Prints one formula name per line.
         broken_formulae() {
           for bf_name in "$@"; do
@@ -294,7 +305,7 @@
               -maxdepth 2 -type f -print 2>/dev/null |
             while read -r bf_file; do
               /usr/bin/otool -L "$bf_file" 2>/dev/null |
-                sed -n 's|^[[:space:]]*\(/opt/homebrew/[^[:space:]]*\).*|\1|p' |
+                sed -n 's|^[[:space:]][[:space:]]*\(/opt/homebrew/[^[:space:]]*\).*|\1|p' |
                 while read -r bf_target; do
                   if [ ! -e "$bf_target" ]; then
                     printf '%s\n' "$bf_name"
