@@ -911,14 +911,18 @@
           "fastfetch"
           "gnupg"
           "pinentry-mac"
-          # node and node@22 coexist DELIBERATELY: node@22 is Evidence's pinned
-          # runtime for the wealth dashboard, plain node serves everything else.
-          # Neither is redundant, so a future cleanup must not read the pair as a
-          # mistake. The pair does share one Homebrew prefix, which is how a
-          # partial dependency upgrade orphaned merve on 2026-08-18; the
-          # verifyLinkage phase of morningMaintenance below is what repairs that.
+          # node is here for the private-office hub's node tooling rather than
+          # for its own sake, and the consumers are named so a future cleanup
+          # does not read it as spare: scripts/generate_report.mjs and
+          # scripts/capture_page.mjs each carry a `#!/usr/bin/env node` shebang,
+          # the biome binary the lint gates invoke by path carries one too, and
+          # check_report_smoke.sh runs the report generator as a commit gate, so
+          # removing node fails every commit in that repo closed. This formula
+          # is also what puts npm and npx on PATH, which the editor's TypeScript
+          # type acquisition uses. node@22 sat beside it until 2026-08-24 as the
+          # Evidence build's pinned runtime; that build was retired on
+          # 2026-08-23 and the pin went with it.
           "node"
-          "node@22"
           "python"
           "tree"
           "virtualenv"
