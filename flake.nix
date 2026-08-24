@@ -107,6 +107,31 @@
     darwinHost = "aurelia";
 
     configuration = { pkgs, config, ... }: let
+      # ROTATION, one body for all six routine logs, spliced into each script
+      # once $LOG is bound and before anything writes.
+      #
+      # TRIMMED IN PLACE AND NEVER RENAMED. Every one of these logs is a launchd
+      # StandardOutPath, so the job holds ONE append handle on the path for the
+      # whole run: truncating keeps that handle pointing at this inode, while a
+      # rename would carry it to the rotated file and leave the live log empty
+      # for the rest of the run. Measured both ways on scratch copies before
+      # this was written, which is the only reason the choice is stated rather
+      # than assumed.
+      #
+      # CAPPED BY BYTES rather than by lines, superseding the line cap the
+      # Software Update script carried alone: these logs relay brew's own
+      # output, whose line length is not this file's to bound, so a line count
+      # bounds the wrong quantity. The retained quarter is about twelve days of
+      # the leading log's measured 11 KB a day, and holds more lines than the
+      # 2000 that cap kept.
+      logTrim = ''
+        # tail -c cuts mid line, so the first partial line goes.
+        if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 524288 ]; then
+          tail -c 131072 "$LOG" | sed '1d' > "$LOG.trim" && cat "$LOG.trim" > "$LOG"
+          rm -f "$LOG.trim"
+        fi
+      '';
+
       # Unattended Software Update run. Runs as the login user: no root, no
       # secrets, and macOS updates are listed only, never installed. Casks whose
       # artifacts carry a pkg stanza run an installer that asks for sudo, which
@@ -127,6 +152,7 @@
 
         log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
+        ${logTrim}
         # Two ways in, one script. A SCHEDULED run (08:00, or the catch-up at
         # load) dedupes on the date stamp below and is unchanged. A REQUESTED
         # run, which the private-office hub asks for by adding run-<uuid>.json to
@@ -173,12 +199,6 @@
         # counts as today's attempt rather than re-firing at every login.
         mkdir -p "$(dirname "$STAMP")"
         printf '%s\n' "$TODAY" > "$STAMP"
-
-        # Trim in place so launchd's append handle keeps pointing at this inode.
-        if [ -f "$LOG" ] && [ "$(wc -l < "$LOG")" -gt 5000 ]; then
-          tail -n 2000 "$LOG" > "$LOG.trim" && cat "$LOG.trim" > "$LOG"
-          rm -f "$LOG.trim"
-        fi
 
         failed=""
 
@@ -369,6 +389,7 @@
 
         log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
+        ${logTrim}
         # NO SCHEDULE AND NO CATCH-UP, which is the one place this differs from
         # the Software Update agent above: every run here was asked for by a
         # person a moment ago, so there is no dedupe stamp to keep and nothing to
@@ -545,6 +566,8 @@
             export HOMEBREW_NO_ENV_HINTS=1
 
             log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+            ${logTrim}
             notify() {
               /usr/bin/osascript -e "display notification \"$1\" with title \"${title}\"" || true
             }
