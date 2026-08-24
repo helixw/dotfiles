@@ -72,6 +72,32 @@
     shoppingTriggerDir = "/Users/helixw/.private-office/triggers-shopping";
     shoppingLock = "/Users/helixw/Library/Caches/private-office-shopping-research.lock";
     shoppingLog = "/Users/helixw/Library/Logs/shopping-research.log";
+    # The THIRD queue, for the hub's Declare Formula routine, and the first whose
+    # requests CARRY A VALUE: the formula name a person typed. That one field is
+    # what puts this watcher on the other side of the collapse rule above. It acts
+    # on EVERY drained request and never on just the last, because two presses are
+    # two different formulae, and it takes them IN ARRIVAL ORDER by sorting the
+    # listing, which the hub spells its filenames to make sufficient.
+    #
+    # WHY IT RUNS HERE AT ALL: the work is an edit to this very file, and it needs
+    # `nix`, `brew`, `git` and this checkout, none of which exist in the hub's
+    # container. It NEVER activates. Declaring a formula puts it in this list;
+    # installing it is `darwin-rebuild`, which stays the user's own hand.
+    systemTriggerDir = "/Users/helixw/.private-office/triggers-system";
+    declareFormulaLog = "/Users/helixw/Library/Logs/declare-formula.log";
+    # WHAT THE HUB READS THIS LIST FROM, and the one thing this machine publishes
+    # for it. The authoritative answer is `nix eval` against this flake, which
+    # needs the /nix store and this checkout; the hub has neither where it serves
+    # (its own app/server/config.ts states that at SYSTEM_BREWS), so the answer is
+    # published as one JSON document into the artifacts directory it already binds
+    # read only. Every write of it goes through publishBrews below.
+    brewsArtifact = "/Users/helixw/.private-office/artifacts/system/brews.json";
+    # This repo, addressed absolutely rather than as a working directory: a
+    # launchd job starts in / and has no notion of where its own source lives.
+    dotfilesDir = "/Users/helixw/Code/dotfiles";
+    # The one host this flake configures, spelled once: the configuration below is
+    # named with it, and the two scripts evaluate that configuration by name.
+    darwinHost = "aurelia";
 
     configuration = { pkgs, config, ... }: let
       # Unattended Software Update run. Runs as the login user: no root, no
@@ -317,6 +343,19 @@
         log "softwareupdate --list"
         /usr/sbin/softwareupdate --list || failed="''${failed:+$failed, }softwareupdate-list"
 
+        # The hub's copy of the declared formulae, refreshed on the daily run so
+        # that a formula added to this file BY HAND reaches the page too, and not
+        # only one added through the watcher below, which republishes for itself.
+        #
+        # IT DOES NOT JOIN "$failed", which is deliberate and not an oversight.
+        # That list is a VOCABULARY THE HUB RENDERS, each token mapped to a
+        # sentence in its own maintenance module, so a token invented here would
+        # reach the user as a raw word. And what this failing costs is the
+        # PREVIOUS list, which was true when it was written, rather than a wrong
+        # one; the next declare or the next morning replaces it.
+        log "publishing the declared formulae for the hub"
+        ${publishBrews} || log "the declared formulae could not be republished"
+
         if [ -n "$failed" ]; then
           log "FAILED: $failed"
           /usr/bin/osascript -e "display notification \"Failed: $failed\" with title \"Software Update\"" || true
@@ -411,6 +450,353 @@
           /usr/bin/osascript -e "display notification \"The run failed (exit $rc); see $LOG\" with title \"Shopping Research\"" || true
           exit 1
         fi
+      '';
+
+      # PUBLISHING WHAT THIS FLAKE DECLARES, so the hub can show it. It is one
+      # command, kept in one place because two callers run it: the Declare Formula
+      # watcher below republishes after every formula it adds, a list still
+      # missing what the user just asked for reading exactly like a press that did
+      # nothing; and the Software Update run republishes daily, so a formula added
+      # by hand in an editor reaches the page as well.
+      #
+      # NIX EVAL RATHER THAN A PARSE OF THIS FILE, which is forced rather than
+      # preferred: the evaluated value is what darwin-rebuild would actually
+      # apply, and it resolves BOTH declaration forms this file uses, the bare
+      # string and the { name = ...; trusted = ...; } attribute set, into one
+      # shape carrying one fully qualified name. A regex over the source would
+      # have to reinvent that and would break the day this block changes shape.
+      #
+      # WRITTEN THROUGH A RENAME inside the artifacts directory itself, so a
+      # reader on the other side of the bind mount sees the previous document or
+      # the new one and never a half written one.
+      publishBrews = pkgs.writeShellScript "publish-brews" ''
+        set -u
+
+        NIX=/nix/var/nix/profiles/default/bin/nix
+        OUT="${brewsArtifact}"
+
+        mkdir -p "$(dirname "$OUT")" || exit 1
+        pb_tmp=$(mktemp "$OUT.XXXXXX") || exit 1
+        if "$NIX" eval "${dotfilesDir}#darwinConfigurations.${darwinHost}.config.homebrew.brews" --json > "$pb_tmp"; then
+          # The mode mktemp gives is the one the temporary file needed, not the
+          # one a published document wants; the hub reads this through a bind
+          # mount and every other artifact under there is world readable.
+          chmod 644 "$pb_tmp"
+          mv -f "$pb_tmp" "$OUT"
+          exit 0
+        fi
+        rm -f "$pb_tmp"
+        exit 1
+      '';
+
+      # THE HUB'S Declare Formula ROUTINE, run here because the work IS an edit to
+      # this file: it needs nix, brew, git and this checkout, and the hub's
+      # container has none of them. It validates the name against Homebrew, adds
+      # it to the brews list above, commits, republishes the list for the hub, and
+      # stops there.
+      #
+      # WHAT IT WILL NOT DO, in the order that matters:
+      #   - it NEVER runs darwin-rebuild. Declaring is not installing, and
+      #     activation is always the user's own hand;
+      #   - it never TRUSTS A NEW TAP. A formula whose tap this flake does not
+      #     already declare trusted is a stop: no edit, no commit, and the reason
+      #     said out loud. HOMEBREW_REQUIRE_TAP_TRUST exists to make trusting a
+      #     third party a deliberate act, and a name typed into a page is not one;
+      #   - it never touches a flake.nix carrying uncommitted work. Its commit is
+      #     path limited, but an edit of the user's in flight is theirs to finish.
+      #
+      # ITS VALIDATION IS `brew info`, WHICH READS AND CHANGES NOTHING. Exit 0
+      # with JSON means the name resolves to a real formula and exit 1 means it
+      # does not, both verified live 2026-08-24. HOMEBREW_NO_AUTO_UPDATE stops
+      # brew refreshing its API cache first, which is the only part of that read
+      # that would touch the network, and the cache it answers from is refreshed
+      # every morning by the Software Update run above. `brew cat` and `brew
+      # linkage` are deliberately NOT used: both are developer commands that
+      # switch Homebrew's developer mode on, which this machine keeps off (the
+      # linkage phase above states the same finding).
+      declareFormula = pkgs.writeShellScript "declare-formula" ''
+        set -u
+
+        NIX=/nix/var/nix/profiles/default/bin/nix
+        BREW=/opt/homebrew/bin/brew
+        GIT=/usr/bin/git
+        DOTFILES="${dotfilesDir}"
+        FLAKE="${dotfilesDir}/flake.nix"
+        HOMEBREW_ATTR="${dotfilesDir}#darwinConfigurations.${darwinHost}.config.homebrew"
+        TRIGGERS="${systemTriggerDir}"
+        LOG="${declareFormulaLog}"
+
+        # PATH resolves brew and jq; HOME is what git reads the user's identity
+        # through and what nix finds its own configuration under, and a launchd
+        # job is not a login shell.
+        export PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+        export HOME=/Users/helixw
+        export USER=helixw
+        export HOMEBREW_NO_AUTO_UPDATE=1
+        export HOMEBREW_NO_ANALYTICS=1
+        export HOMEBREW_NO_ENV_HINTS=1
+
+        log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+        notify() {
+          /usr/bin/osascript -e "display notification \"$1\" with title \"Declare Formula\"" || true
+        }
+
+        # THE DRAIN, which is the contract's and is stated in full at the first
+        # agent above: every entry goes, recognised or not, because
+        # QueueDirectories relaunches this job every 10 seconds for as long as
+        # anything is left; and exactly what was LISTED is what is deleted, so a
+        # press landing mid drain survives to earn its own relaunch.
+        #
+        # WHAT IS DIFFERENT HERE IS THE ORDER AND THE READING. Each request
+        # carries the formula a person typed, so the body is load bearing rather
+        # than a log line, and it is read BEFORE the entry is deleted. The listing
+        # is sorted, which is arrival order: the hub leads every name with a fixed
+        # width ISO instant precisely so that a plain sort is enough. N requests
+        # are N runs, never one, because two presses are two different formulae.
+        drained=$(mktemp -t private-office-declare-drain)
+        requested=$(mktemp -t private-office-declare-requests)
+        find "$TRIGGERS" -mindepth 1 -maxdepth 1 2>/dev/null | LC_ALL=C sort > "$drained" || true
+        while IFS= read -r entry; do
+          case "$entry" in
+            */run-*.json)
+              requested_at=$(jq -r '.requested_at // "unknown"' < "$entry" 2>/dev/null || echo unknown)
+              formula=$(jq -r '.argument // empty' < "$entry" 2>/dev/null || true)
+              log "request drained ($(basename "$entry"), requested_at $requested_at, formula ''${formula:-none})"
+              if [ -n "$formula" ]; then
+                printf '%s\n' "$formula" >> "$requested"
+              else
+                log "that request carried no formula name, so there is nothing to declare for it"
+              fi
+              ;;
+            *)
+              log "unrecognised entry drained from $TRIGGERS: $(basename "$entry")"
+              ;;
+          esac
+          rm -rf -- "$entry"
+        done < "$drained"
+        rm -f "$drained"
+
+        # A launch with nothing to run is ordinary rather than exceptional: it is
+        # what the relaunch after a drain always finds. Nothing here has a
+        # schedule, so no request means no work.
+        if [ ! -s "$requested" ]; then
+          log "no formula in the queue; nothing to do"
+          rm -f "$requested"
+          exit 0
+        fi
+
+        # THE USER'S OWN EDIT COMES FIRST. A commit here is limited to flake.nix,
+        # so an unrelated file in flight is safe either way, but an unfinished
+        # edit to THIS file would be committed under a message about a formula.
+        # Checked once for the whole run rather than per request, since the answer
+        # cannot change while this job holds the only other pen.
+        if ! "$GIT" -C "$DOTFILES" diff --quiet -- flake.nix ||
+           ! "$GIT" -C "$DOTFILES" diff --cached --quiet -- flake.nix; then
+          log "FAILED: flake.nix carries uncommitted changes, so nothing was declared"
+          notify "flake.nix has uncommitted changes, so nothing was declared"
+          rm -f "$requested"
+          exit 1
+        fi
+
+        # Every formula this flake declares, under the name nix resolves it to,
+        # which is what makes one read cover both declaration forms.
+        declared_names() {
+          "$NIX" eval "$HOMEBREW_ATTR.brews" --json | jq -r '.[].name'
+        }
+
+        # A tap as Homebrew addresses it: a repository named homebrew-tap is the
+        # tap called plain tap, and case never matters.
+        normalise_tap() {
+          printf '%s\n' "$1" | sed 's|/homebrew-|/|' | tr '[:upper:]' '[:lower:]'
+        }
+
+        # The taps trusted at the top of the homebrew block, whose formulae need
+        # nothing of their own beyond a qualified name.
+        declared_taps() {
+          "$NIX" eval "$HOMEBREW_ATTR.taps" --json |
+            jq -r '.[] | select(.trusted) | .name' | sed 's|/homebrew-|/|'
+        }
+
+        # Every tap this flake trusts by any route, the block above plus any brew
+        # entry carrying the flag itself, which is how oven-sh/bun/bun is written.
+        trusted_taps() {
+          declared_taps
+          "$NIX" eval "$HOMEBREW_ATTR.brews" --json |
+            jq -r '.[] | select(.trusted) | .name | split("/") | select(length == 3) | .[0:2] | join("/")' |
+            sed 's|/homebrew-|/|'
+        }
+
+        # ADDING ONE ENTRY, at the END of the list and never in sorted position:
+        # that list is grouped by purpose with a comment over each group, so an
+        # alphabetical insertion would split a group and orphan its comment. The
+        # closing bracket is FOUND rather than remembered, by matching the line
+        # that opens the list and then the first line at the same indentation that
+        # closes it, so neither a line number nor an edit elsewhere in the file
+        # can send this to the wrong place.
+        insert_brew() {
+          ib_tmp=$(mktemp -t private-office-declare-flake) || return 1
+          if awk -v entry="$1" '
+            state == 0 && $0 ~ /^[[:space:]]*brews[[:space:]]*=[[:space:]]*\[[[:space:]]*$/ {
+              match($0, /^[[:space:]]*/)
+              indent = substr($0, 1, RLENGTH)
+              closing = indent "];"
+              state = 1
+              print
+              next
+            }
+            state == 1 && $0 == closing { print indent "  " entry; state = 2 }
+            { print }
+            END { exit(state == 2 ? 0 : 1) }
+          ' "$FLAKE" > "$ib_tmp"; then
+            # Written back through the same inode, so the file keeps its mode.
+            cat "$ib_tmp" > "$FLAKE"
+            rm -f "$ib_tmp"
+            return 0
+          fi
+          rm -f "$ib_tmp"
+          return 1
+        }
+
+        # ONE REQUEST, START TO FINISH. 0 means the formula is declared, whether
+        # this run is what declared it or it was already there; 1 means it is not,
+        # and the log line above the return says why in the reader's words.
+        declare_formula() {
+          df_typed="$1"
+
+          # WHERE THE NAME COMES FROM decides how far this can go before touching
+          # anything. A tap qualified name addresses a third party, and the tap is
+          # checked HERE, before brew is called at all: `brew info` on a tap this
+          # machine has never seen would clone it, which is the very trust
+          # decision this must not make on the user's behalf.
+          # The arms are ordered from the longest shape down, which is how a case
+          # picks the right one: a formula is a bare name or exactly the three
+          # segments of user/repo/formula, and anything else is neither.
+          case "$df_typed" in
+            */*/*/*)
+              log "FAILED $df_typed: that is not a formula name"
+              return 1
+              ;;
+            */*/*)
+              df_tap=$(normalise_tap "$(dirname "$df_typed")")
+              if ! trusted_taps | grep -qxF "$df_tap"; then
+                log "FAILED $df_typed: this flake does not trust the tap $df_tap, so nothing was declared"
+                return 1
+              fi
+              ;;
+            */*)
+              log "FAILED $df_typed: that is not a formula name"
+              return 1
+              ;;
+          esac
+
+          if ! df_json=$("$BREW" info --formula "$df_typed" --json=v2 2>/dev/null); then
+            log "FAILED $df_typed: Homebrew has no formula by that name"
+            return 1
+          fi
+          df_canonical=$(printf '%s' "$df_json" | jq -r '.formulae[0].name // empty')
+          df_full=$(printf '%s' "$df_json" | jq -r '.formulae[0].full_name // empty')
+          df_tapname=$(printf '%s' "$df_json" | jq -r '.formulae[0].tap // empty')
+          df_aliases=$(printf '%s' "$df_json" | jq -r '.formulae[0].aliases[]?')
+          if [ -z "$df_full" ] || [ -z "$df_tapname" ]; then
+            log "FAILED $df_typed: Homebrew answered nothing this could read"
+            return 1
+          fi
+
+          # HOW IT WILL BE WRITTEN, in whichever of the three forms this file
+          # already uses, and the last place a formula can still be refused.
+          if [ "$df_tapname" = "homebrew/core" ]; then
+            # The name as typed, which is what the user would have written here
+            # by hand and the form every core entry above carries.
+            df_name="$df_typed"
+            df_entry="\"$df_typed\""
+          else
+            df_tap=$(normalise_tap "$df_tapname")
+            df_name="$df_full"
+            if declared_taps | grep -qxF "$df_tap"; then
+              df_entry="\"$df_full\""
+            elif trusted_taps | grep -qxF "$df_tap"; then
+              # Trusted only through a brew entry of its own, so a sibling from
+              # that tap carries the flag the same way bun does.
+              df_entry="{ name = \"$df_full\"; trusted = true; }"
+            else
+              log "FAILED $df_typed: this flake does not trust the tap $df_tap, so nothing was declared"
+              return 1
+            fi
+          fi
+
+          # THE NAME TYPED IS NOT THE ONLY NAME IT HAS, which is why the check is
+          # against every name Homebrew knows rather than the one word that
+          # arrived: `python` is an ALIAS of python@3.14 and this list declares
+          # the alias, so a check on the typed word alone would declare a second
+          # entry for a formula that is already there.
+          if ! df_declared=$(declared_names); then
+            log "FAILED $df_typed: the declared formulae could not be read"
+            return 1
+          fi
+          # Intentional word splitting: one alias per line.
+          # shellcheck disable=SC2086
+          for df_known in "$df_typed" "$df_canonical" "$df_full" $df_aliases; do
+            if printf '%s\n' "$df_declared" | grep -qxF "$df_known"; then
+              log "$df_typed is already declared (as $df_known); nothing to add"
+              return 0
+            fi
+          done
+
+          if ! insert_brew "$df_entry"; then
+            log "FAILED $df_typed: it could not be added to the brews list"
+            return 1
+          fi
+
+          # THE EDIT PROVES ITSELF BEFORE IT IS COMMITTED. The flake must still
+          # evaluate AND must evaluate with this formula in it, which is one read
+          # answering both questions. A file that fails it is restored, because a
+          # flake.nix that does not evaluate is a machine that cannot be activated
+          # at all and no one request is worth that.
+          if ! declared_names | grep -qxF "$df_name"; then
+            log "FAILED $df_typed: the flake did not evaluate with it, so the edit was reverted"
+            "$GIT" -C "$DOTFILES" checkout -- flake.nix
+            return 1
+          fi
+
+          df_message=$(mktemp -t private-office-declare-message) || return 1
+          printf 'feat(homebrew): declare %s\n' "$df_name" > "$df_message"
+          if ! "$GIT" -C "$DOTFILES" commit -q -F "$df_message" -- flake.nix; then
+            rm -f "$df_message"
+            log "FAILED $df_typed: the commit was refused, so the edit was reverted"
+            "$GIT" -C "$DOTFILES" checkout -- flake.nix
+            return 1
+          fi
+          rm -f "$df_message"
+
+          # REPUBLISHED HERE rather than once at the end, so that a run declaring
+          # three formulae shows each one as it lands.
+          if ! ${publishBrews}; then
+            log "FAILED $df_typed: declared and committed, but the list the hub reads could not be republished"
+            return 1
+          fi
+
+          log "declared $df_name"
+          return 0
+        }
+
+        failures=0
+        while IFS= read -r formula; do
+          declare_formula "$formula" || failures=$((failures + 1))
+        done < "$requested"
+        rm -f "$requested"
+
+        # SAID OUT LOUD, because the hub cannot say it. Its row for this routine
+        # reports what is in the queue, and the queue is empty by now either way;
+        # what it shows beyond that is the declared list itself, which is the
+        # whole report for a formula that landed and no report at all for one that
+        # did not. A notification is the only place a refusal is visible.
+        if [ "$failures" -gt 0 ]; then
+          log "FAILED: $failures request(s) declared nothing"
+          notify "$failures request(s) declared nothing; see $LOG"
+          exit 1
+        fi
+
+        log "done"
       '';
     in {
       # Package configuration
@@ -693,6 +1079,28 @@
         };
       };
 
+      # The hub's Declare Formula, the third consumer of the trigger idiom above
+      # and, like the second, on demand only.
+      #
+      # NO LOCK AND NO caffeinate, which is where it differs from both agents
+      # above, and both omissions are reasoned rather than skipped. It takes
+      # seconds, so there is no idle sleep to hold off. And the state it writes is
+      # this repo's working tree, which no other job here touches, while the two
+      # locks above serialize Homebrew's prefix, which this one only reads;
+      # launchd already runs a single instance of a job at a time. The one
+      # collision left, the user editing flake.nix by hand, is refused by the
+      # script's own check on the working tree, which is the only mechanism an
+      # editor would take part in.
+      launchd.user.agents.declare-formula = {
+        command = "${declareFormula}";
+        serviceConfig = {
+          ProcessType = "Background";
+          QueueDirectories = [ systemTriggerDir ];
+          StandardOutPath = declareFormulaLog;
+          StandardErrorPath = declareFormulaLog;
+        };
+      };
+
       # Nix daemon configuration
       # Disable nix-darwin's Nix management: the daemon is owned by upstream
       # Nix's own multi-user install (/Library/LaunchDaemons/org.nixos.nix-daemon.plist),
@@ -707,7 +1115,7 @@
     };
   in {
     # Darwin system configuration
-    darwinConfigurations."aurelia" = nix-darwin.lib.darwinSystem {
+    darwinConfigurations.${darwinHost} = nix-darwin.lib.darwinSystem {
       modules = [
         configuration
         nix-homebrew.darwinModules.nix-homebrew
@@ -745,6 +1153,7 @@
                 # the hub's first write. One per watching job.
                 mkdir -p "${maintenanceTriggerDir}"
                 mkdir -p "${shoppingTriggerDir}"
+                mkdir -p "${systemTriggerDir}"
               '';
 
               # Configuration file management
