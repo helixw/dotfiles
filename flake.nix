@@ -142,6 +142,7 @@
         set -u
 
         BREW=/opt/homebrew/bin/brew
+        DOCKER=/opt/homebrew/bin/docker
         LOG="${maintenanceLog}"
         STAMP="${maintenanceStamp}"
         TRIGGERS="${maintenanceTriggerDir}"
@@ -341,6 +342,20 @@
         log "brew cleanup"
         "$BREW" cleanup || failed="''${failed:+$failed, }brew-cleanup"
 
+        # DANGLING IMAGES ONLY, which is what a bare prune collects: every hub
+        # image build leaves its predecessor untagged inside colima's VM, whose
+        # disk nothing else reclaims, while -a would take the images the hub
+        # still runs from. Standing consent for the daily run, 2026-08-25.
+        # An absent CLI and a stopped daemon are both reported as this step
+        # failing, and neither stops the steps below.
+        log "docker image prune"
+        if [ ! -x "$DOCKER" ]; then
+          log "docker is not installed; the image prune did not run"
+          failed="''${failed:+$failed, }docker-image-prune"
+        else
+          "$DOCKER" image prune --force || failed="''${failed:+$failed, }docker-image-prune"
+        fi
+
         # Report only. Installing macOS updates needs root and stays manual.
         log "softwareupdate --list"
         /usr/sbin/softwareupdate --list || failed="''${failed:+$failed, }softwareupdate-list"
@@ -436,8 +451,8 @@
         fi
       '';
 
-      # PUBLISHING WHAT THIS FLAKE DECLARES, formulae AND casks, so the hub can
-      # show it. Two callers run it: the Add Formula watcher below
+      # PUBLISHING WHAT THIS FLAKE DECLARES, formulae, casks AND taps, so the hub
+      # can show it. Two callers run it: the Add Formula watcher below
       # republishes after every formula it adds, a list still missing what the
       # user just asked for reading exactly like a press that did nothing; and
       # the Software Update run republishes daily, so an item added by hand in an
@@ -460,6 +475,7 @@
 
         "$NIX" eval "$HOMEBREW_ATTR.brews" --json > "$pb_work/formulae.json" || exit 1
         "$NIX" eval "$HOMEBREW_ATTR.casks" --json > "$pb_work/casks.json" || exit 1
+        "$NIX" eval "$HOMEBREW_ATTR.taps" --json > "$pb_work/taps.json" || exit 1
 
         # An empty map is what every failure path below leaves in place, and the
         # assembly reads a name missing from it as missing metadata.
@@ -495,16 +511,28 @@
           fi
         fi
 
+        # THE TAPS KEY IS ADDITIVE and the two above it keep their exact shape,
+        # so a consumer that knows only formulae and casks is untouched by
+        # construction. Homebrew is never asked about a tap: what the hub reports
+        # is what this file DECLARES, so the two fields declared here are the two
+        # published, and nix-darwin's own brewfileLine, clone_target and
+        # force_auto_update are dropped rather than shipped as vocabulary no
+        # reader has a use for. `trusted` is published as a plain boolean because
+        # the option is null until it is declared, and what the reader is owed is
+        # whether this file trusts the tap, not which of two ways it stayed
+        # silent.
         pb_tmp=$(mktemp "$OUT.XXXXXX") || exit 1
         if jq -n \
           --slurpfile formulae "$pb_work/formulae.json" \
           --slurpfile casks "$pb_work/casks.json" \
+          --slurpfile taps "$pb_work/taps.json" \
           --slurpfile formula_desc "$pb_work/formula-desc.json" \
           --slurpfile cask_meta "$pb_work/cask-meta.json" \
           '{
              formulae: [$formulae[0][] | . + {description: ($formula_desc[0][.name] // "")}],
              casks: [$casks[0][] | ($cask_meta[0][.name] // {}) as $m |
-                     {name, description: ($m.description // ""), title: ($m.title // "")}]
+                     {name, description: ($m.description // ""), title: ($m.title // "")}],
+             taps: [$taps[0][] | {name, trusted: (.trusted == true)}]
            }' > "$pb_tmp"; then
           # The mode mktemp gives is the one the temporary file needed, not the
           # one a published document wants; the hub reads this through a bind
@@ -1041,7 +1069,6 @@
           { name = "lzhgus/homebrew-tap"; trusted = true; }
         ];
         brews = [
-          "mas"
           "starship"
           "fontconfig"
           "fastfetch"
@@ -1061,7 +1088,6 @@
           "node"
           "python"
           "tree"
-          "virtualenv"
           "git-secret"
           "gh"
           "uv"
@@ -1108,7 +1134,6 @@
           "visual-studio-code"
           "parsec"
           "ghostty"
-          "altserver"
           "webcatalog"
           "notion"
           "ticktick"
