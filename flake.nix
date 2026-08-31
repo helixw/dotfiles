@@ -142,7 +142,6 @@
         set -u
 
         BREW=/opt/homebrew/bin/brew
-        DOCKER=/opt/homebrew/bin/docker
         LOG="${maintenanceLog}"
         STAMP="${maintenanceStamp}"
         TRIGGERS="${maintenanceTriggerDir}"
@@ -341,20 +340,6 @@
 
         log "brew cleanup"
         "$BREW" cleanup || failed="''${failed:+$failed, }brew-cleanup"
-
-        # DANGLING IMAGES ONLY, which is what a bare prune collects: every hub
-        # image build leaves its predecessor untagged inside colima's VM, whose
-        # disk nothing else reclaims, while -a would take the images the hub
-        # still runs from. Standing consent for the daily run, 2026-08-25.
-        # An absent CLI and a stopped daemon are both reported as this step
-        # failing, and neither stops the steps below.
-        log "docker image prune"
-        if [ ! -x "$DOCKER" ]; then
-          log "docker is not installed; the image prune did not run"
-          failed="''${failed:+$failed, }docker-image-prune"
-        else
-          "$DOCKER" image prune --force || failed="''${failed:+$failed, }docker-image-prune"
-        fi
 
         # Report only. Installing macOS updates needs root and stays manual.
         log "softwareupdate --list"
