@@ -1123,7 +1123,6 @@
           # hits. Its formula symlinks the plugin into that same
           # /opt/homebrew/lib/docker/cli-plugins, so the registration entry
           # below already reaches it and it needs no wiring of its own.
-          "docker"
           "docker-buildx"
           "docker-compose"
           { name = "oven-sh/bun/bun"; trusted = true; }
