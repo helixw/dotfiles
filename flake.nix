@@ -1093,6 +1093,14 @@
           "uv"
           "lefthook"
           "shellcheck"
+          # TOML lint and format for private-office's lint-coverage goal
+          # (2026-08-30). Verified live that day: the npm package @taplo/cli
+          # sits at 0.7.0, published 2024, against this bottled formula's
+          # 0.10.0, so the maintained line is the native binary rather than
+          # the JS wrapper. taplo lint and taplo fmt --check are both wired
+          # as fail-closed lefthook jobs in that repo, so removing this
+          # formula blocks every commit there closed.
+          "taplo"
           "poppler"
           "btop"
           # The container runtime the private-office hub runs on. colima hosts
