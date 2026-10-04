@@ -11,7 +11,7 @@
     # an older pinned brew crashes deserializing stanzas it doesn't know
     # (e.g. `depends_on :macos` in 5.1.x, `postflight_steps` in 6.0.x).
     brew-src = {
-      url = "github:Homebrew/brew/6.0.11";
+      url = "github:Homebrew/brew/7.0.4";
       flake = false;
     };
     nix-homebrew.inputs.brew-src.follows = "brew-src";
