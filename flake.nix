@@ -1086,6 +1086,11 @@
           # as fail-closed lefthook jobs in that repo, so removing this
           # formula blocks every commit there closed.
           "taplo"
+          # Prose lint for private-office (vale 3.24.0, MIT, verified live
+          # 2026-10-04 with `brew info vale`). check_vale.sh is a fail-closed
+          # lefthook job in that repo, so an undeclared vale is zapped at
+          # activation and blocks every commit there closed.
+          "vale"
           "poppler"
           "btop"
           # The container runtime the private-office hub runs on. colima hosts
