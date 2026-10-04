@@ -1133,7 +1133,7 @@
           "claude"
           "claude-code"
           "google-chrome"
-          "superwhisper"
+          "handy"
           "lzhgus/tap/capso"
           "discord"
           "calibre"
